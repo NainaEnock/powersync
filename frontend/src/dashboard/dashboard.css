@@ -225,14 +225,8 @@
 @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .appear, .typing-dots i, .tab-live { animation: none; } }
 
-/* single-column views (Overview, Schedule): the chart or timeline gets the screen */
-.dash-view { flex: 1; min-height: 560px; display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
-.dash-view .chart-card { flex: 1; min-height: 340px; }
-.dash-view .chart-box { min-height: 260px; }
-.dash-view .timeline-card { flex: 1; display: flex; flex-direction: column; }
-.dash-view .tl { flex: 1; display: flex; flex-direction: column; }
-.dash-view .tl-row { flex: 1; height: auto; min-height: 34px; max-height: 64px; }
-.dash-view .tl-label { font-size: 14px; }
-.dash-view .tl-bar { top: 18%; bottom: 18%; font-size: 13px; }
-.dash-view .tl-out-label { font-size: 13px; }
-.dash-view .tl-axis, .dash-view .tl-row { grid-template-columns: 220px minmax(0, 1fr); }
+/* Graph & data tab: full width, the chart takes the spare height */
+.dash-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.dash-view > * { flex: none; }
+.dash-view .chart-card { flex: 1 1 auto; min-height: 210px; }
+.dash-view .chart-box { flex: 1; min-height: 120px; }
