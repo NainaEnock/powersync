@@ -54,7 +54,7 @@
 /* main grid */
 .dash-main {
   display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 12px; margin-top: 12px;
-  flex: 1; min-height: 600px;
+  flex: 1; min-height: 560px;
 }
 .dash-left { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 12px 16px; box-shadow: 0 1px 2px rgba(31, 42, 36, .04); }
@@ -188,3 +188,39 @@
 .popover label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
 .popover input { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border-2); background: #fff; color: var(--fg); font: inherit; }
 .popover-row { display: flex; gap: 8px; }
+
+/* view tabs */
+.tabs { display: flex; align-items: center; gap: 4px; margin-top: 10px; border-bottom: 1px solid var(--border); }
+.tabs button {
+  display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border: 0; border-bottom: 2px solid transparent;
+  background: transparent; color: var(--muted); font-size: 14px; font-weight: 650; cursor: pointer; margin-bottom: -1px;
+}
+.tabs button.on { color: var(--fg); border-bottom-color: var(--brand); }
+.tab-count { font-size: 11px; font-weight: 800; background: #eceee6; color: var(--fg-2); border-radius: 999px; padding: 1px 7px; }
+.tab-live { width: 8px; height: 8px; border-radius: 50%; background: #d4891c; animation: pulse 1s ease-in-out infinite; }
+.tab-link { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); text-decoration: none; }
+.tab-link:hover { color: var(--brand); }
+
+/* conversation tab */
+.dash-chat { flex: 1; min-height: 600px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 12px; margin-top: 12px; }
+.chat-side { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+.chat-side .tiles { grid-template-columns: 1fr 1fr; }
+.chat-side .homes { grid-template-columns: 1fr; }
+.chat-side .home + .home { border-left: 0; border-top: 1px solid var(--border); padding-top: 6px; margin-top: 6px; }
+.convo-full .convo-list { gap: 12px; padding: 0 8px; }
+.convo-full .msg { font-size: 17px; padding: 12px 16px; max-width: 900px; }
+.convo-full .msg-who { font-size: 15.5px; }
+.convo-full .msg p { line-height: 1.45; }
+.convo-full .tool { max-width: 900px; }
+
+/* texting feel */
+.appear { animation: appear .35s ease-out; }
+@keyframes appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.typing { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; padding: 8px 14px; border: 1px solid var(--border); border-radius: 14px; background: #fff; font-size: 13px; color: var(--fg-2); }
+.typing-who { font-weight: 700; }
+.typing-dots { display: inline-flex; gap: 4px; }
+.typing-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite ease-in-out; }
+.typing-dots i:nth-child(2) { animation-delay: .2s; }
+.typing-dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .appear, .typing-dots i, .tab-live { animation: none; } }

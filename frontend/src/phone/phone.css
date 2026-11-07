@@ -536,3 +536,14 @@
 .ps-nowrap {
   white-space: nowrap;
 }
+
+/* Full conversation, collapsed by default under the key updates. */
+.ps-convo { margin-top: 10px; border-top: 1px solid var(--ps-line); padding-top: 8px; }
+.ps-convo > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px;
+  min-height: 44px; font-weight: 600; color: var(--ps-home);
+}
+.ps-convo > summary::-webkit-details-marker { display: none; }
+.ps-convo > summary::before { content: '▸'; transition: transform .15s ease; }
+.ps-convo[open] > summary::before { transform: rotate(90deg); }
+.ps-convo > .ps-messages { margin-top: 6px; }

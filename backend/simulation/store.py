@@ -7,6 +7,7 @@ server-side privacy filter for ?home= views.
 from __future__ import annotations
 
 import asyncio
+import re
 import os
 import sys
 import uuid
@@ -477,7 +478,12 @@ class Store:
             self.tasks = new_tasks
             self.requirements_version = rv
             self.coordinated = schedule
-            self.plan_counter += 1
+            # Skip past every plan number this job used (it may propose Plan 1 and commit Plan 2),
+            # so the next replan is "Plan 3", never "Plan 2" again.
+            used = [proposal_id] + [p.get("proposal_id") for p in ((result.raw or {}).get("plans") or [])
+                                    if isinstance(p, dict)] if result is not None else [proposal_id]
+            nums = [int(m.group(1)) for pid in used if isinstance(pid, str) and (m := re.match(r"P-(\d+)$", pid))]
+            self.plan_counter = max([self.plan_counter + 1, *nums])
             self.coordination = {
                 "status": "committed", "explanation": explanation, "reasons": [], "job_id": job.id,
                 "source": source, "proposal_id": proposal_id, "plan_name": plan_name,
