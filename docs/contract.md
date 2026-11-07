@@ -34,6 +34,8 @@ All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.
 | `POST /api/action` | home | `{"home_id":"A","action":"confirm_change"\|"reject_change","pending_change_id":"pc-…","request_id":"phone-a-<uuid>","expected_revision":4}` | `202 {job_id, status, accepted_revision}` |
 | `POST /api/coordinate` | admin | `{}` | `202 {job_id, status, accepted_revision}` |
 | `POST /api/tariff` | admin | `{"tariff_mode":"tou"\|"flat"}` | `200 {revision, tariff_mode}` |
+| `GET /api/appliances/catalog` | none | | `{schedulable: [{kind, label, name, power_kw, duration_slots, deadline_slot, preferred_start_slot, note}], not_schedulable: [{name, why}], max_per_home}` |
+| `POST /api/appliances` | home | add: `{"home_id":"A","action":"add","kind":"water_heater","deadline_slot":48}` (deadline optional, 1–96). remove: `{"home_id":"A","action":"remove","task_id":"a_dish"}` | `200 {revision, task_id}` |
 | `GET /api/jobs/{id}` | none | | Job (PRD §10) |
 | `POST /api/reset` | admin | `{}` | `200 {revision, generation, tariff_mode}` |
 
@@ -58,6 +60,14 @@ All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.
 | any | reset during the job | `failed`, `error: "RESET: …"` (then the job is gone → 404) |
 
 Confirm **applies the edit and replans in one job, with one revision bump**.
+
+### Appliance editing (added by B in PR #28, reviewed by D)
+
+- Kinds: `ev`, `dryer`, `washer`, `dishwasher`, `water_heater`, `ac`, `pool_pump` (values in `backend/simulation/appliances.py`). New task IDs are `<home>_<kind>`, with a number added if needed (`a_water_heater`, `a_ev2`).
+- Limits: at most 6 appliances per home, at least 1. A deadline shorter than the run time → `400`. Another home's appliance → `403`. Unknown `task_id` → `404`. Any job queued or running → `409 JOB_RUNNING`.
+- Effect: `requirements_version` and `revision` go up, the committed plan is cleared (`coordinated_schedule: null`, `coordination.status: "not_run"`, `reasons[0]`: "Appliances changed. Coordinate again to plan the new set."), and a pending change to a removed appliance becomes `stale`. The three comparison schedules are recomputed. One `info` event: the home sees "You added …", the others see "Home A added an appliance …" (never its name).
+- Reset restores the six scenario appliances. **Demo note:** this changes the §9.4 conflict, so run the main story (Plan 1 → B objects → Plan 2) before anyone adds or removes appliances.
+- Scheduler load, measured: 15–18 appliances, feasible or impossible, finish in ≤0.4 s, with a hard cap of about 1 s (50,000-option search budget).
 
 ## 3. Dashboard state (`GET /api/state`)
 

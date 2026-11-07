@@ -586,7 +586,7 @@ class Store:
         for p in self.pending.values():  # a waiting change to the removed appliance can't apply anymore
             if p.status == "pending" and any(e.task_id == task_id for e in p.proposed_edits.edits):
                 p.status = "stale"
-        self._appliances_changed(home_id, f"You removed the {task.name.lower()}.", "removed")
+        self._appliances_changed(home_id, f"You removed the {noun(task)}.", "removed")
 
     # ------------------------------------------------------------ tariff & reset
 

@@ -91,20 +91,26 @@ CoordinateFn = Callable[[CoordinateContext, Emit], Awaitable[CoordinateResult]]
 # ------------------------------------------------------------------ stub interpreter
 
 _TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)", re.I)
-_WORDS = {
-    "ev": ("car", "ev", "charg", "vehicle"),
-    "dryer": ("dryer", "laundry", "clothes"),
-    "dish": ("dish",),
-}
+# (words the resident might say, words in the appliance's name). Order matters: "dishwasher" before "washer".
+_WORDS = [
+    (("car", " ev", "ev ", "charg", "vehicle"), ("ev ", "car")),
+    (("dryer",), ("dryer",)),
+    (("dish",), ("dishwasher",)),
+    (("washing", "washer", "laundry"), ("washing",)),
+    (("water heater", "hot water"), ("water heater",)),
+    (("air con", " ac ", "a/c", "cooling"), ("air conditioning",)),
+    (("pool",), ("pool",)),
+]
 
 
 def _find_task(snap: Snapshot, home_id: str, text: str) -> Optional[str]:
-    low = text.lower()
+    """Match the resident's words to one of their own appliances by name (works for added appliances too)."""
+    low = f" {text.lower()} "
     own = [t for t in snap.tasks if t.home_id == home_id]
-    for key, words in _WORDS.items():
-        if any(w in low for w in words):
+    for said, named in _WORDS:
+        if any(w in low for w in said):
             for t in own:
-                if t.id.endswith(key):
+                if any(n in f"{t.name.lower()} " for n in named):
                     return t.id
     return None
 
