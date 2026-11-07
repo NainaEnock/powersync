@@ -557,3 +557,5 @@
 .ps-field { display: grid; gap: 4px; font-weight: 600; font-size: 14px; }
 .ps-field select { min-height: 44px; }
 .ps-error { color: var(--ps-bad); font-weight: 600; margin: 8px 0 0; }
+.ps-remove-confirm { display: flex; gap: 6px; flex-shrink: 0; }
+.ps-danger { background: var(--ps-bad); border-color: var(--ps-bad); color: #fff; }

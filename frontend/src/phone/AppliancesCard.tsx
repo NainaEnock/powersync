@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ApiError, type Api } from '../api'
 import { slotToTime } from '../time'
 import type { ApplianceCatalog, HomeId, NeighborhoodState } from '../types'
+import { errorText } from './usePhoneFlow'
 
 const hours = (slots: number) => {
   const m = slots * 15
@@ -25,10 +26,17 @@ export function AppliancesCard({ homeId, api, state, busy, onChanged }: {
   const [deadline, setDeadline] = useState<number | null>(null)
   const [working, setWorking] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Removing replans the whole street, so it takes a second tap.
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
 
+  // Load the catalog; if the backend was unreachable, try again on the next state update.
+  const haveCatalog = catalog !== null
   useEffect(() => {
-    api.applianceCatalog().then(setCatalog).catch(() => setCatalog(null))
-  }, [api])
+    if (haveCatalog) return
+    let cancelled = false
+    api.applianceCatalog().then((c) => { if (!cancelled) setCatalog(c) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [api, haveCatalog, state.revision])
 
   const own = state.tasks.filter((t) => t.home_id === homeId)
   const spec = catalog?.schedulable.find((a) => a.kind === kind) ?? null
@@ -59,7 +67,7 @@ export function AppliancesCard({ homeId, api, state, busy, onChanged }: {
       onChanged()
       return true
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Something went wrong. Try again.')
+      setError(e instanceof ApiError ? errorText(e) : 'Something went wrong. Try again.')
       return false
     } finally {
       setWorking(null)
@@ -95,14 +103,32 @@ export function AppliancesCard({ homeId, api, state, busy, onChanged }: {
                 {t.power_kw} kW · {hours(t.duration_slots)} · done by {slotToTime(t.deadline_slot)}
               </div>
             </div>
-            <button
-              className="ps-icon-btn"
-              aria-label={`Remove ${t.name}`}
-              disabled={disabled || own.length <= 1}
-              onClick={() => run(t.id, () => api.removeAppliance(homeId, t.id))}
-            >
-              {working === t.id ? <Loader2 className="ps-spin" aria-hidden /> : <Trash2 aria-hidden />}
-            </button>
+            {confirmRemove === t.id ? (
+              <div className="ps-remove-confirm">
+                <button
+                  className="ps-btn ps-small ps-danger"
+                  disabled={disabled}
+                  onClick={async () => {
+                    await run(t.id, () => api.removeAppliance(homeId, t.id))
+                    setConfirmRemove(null)
+                  }}
+                >
+                  {working === t.id ? <Loader2 className="ps-spin" aria-hidden /> : null} Remove
+                </button>
+                <button className="ps-btn ps-small" disabled={working === t.id} onClick={() => setConfirmRemove(null)}>
+                  Keep
+                </button>
+              </div>
+            ) : (
+              <button
+                className="ps-icon-btn"
+                aria-label={`Remove ${t.name}`}
+                disabled={disabled || own.length <= 1}
+                onClick={() => { setError(null); setConfirmRemove(t.id) }}
+              >
+                <Trash2 aria-hidden />
+              </button>
+            )}
           </li>
         ))}
       </ul>
