@@ -156,7 +156,7 @@ async def _interpret(snapshot, home_id, text, emit, *, job_id, model, tools, set
         res.update(proposed_edits={"edits": edits}, feasible=False, infeasible_reasons=reasons, explanation=clip(msg))
         return res
 
-    msg = f"Change {change_words}? Confirm on your phone and I'll replan with the neighbors."
+    msg = f"Change {change_words}?"  # D appends "Confirm on your phone to replan with the neighbors."
     await em.stage(None)
     res = _result("proposed_change", clip(msg), model, budget)
     res.update(proposed_edits={"edits": edits}, feasible=True, infeasible_reasons=[], explanation=clip(msg))

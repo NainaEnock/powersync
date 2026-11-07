@@ -259,6 +259,11 @@ def test_replan_continues_numbering_and_compares_with_current_plan(snapshot):
     assert res["plan_name"].startswith("Plan ") and int(res["plan_name"].split()[1]) >= 3
 
 
+def test_ask_wording_uses_hours():
+    from backend.agents.wording import _span
+    assert [_span(x) for x in (45, 60, 120, 90)] == ["45 minutes", "1 hour", "2 hours", "1 hour 30 minutes"]
+
+
 def test_planner_down_says_safe_plan(snapshot):
     class DeadTools(EnergyTools):
         async def call(self, name, arguments):

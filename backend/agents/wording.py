@@ -245,12 +245,19 @@ def review_view(snap, home_id: str, plan_name: str, accept: bool, own_pricey: li
     return f"Your agent reviewed {plan_name} and raised a concern."
 
 
+def _span(minutes: int) -> str:
+    """45 -> '45 minutes', 60 -> '1 hour', 120 -> '2 hours', 90 -> '1 hour 30 minutes'."""
+    h, m = divmod(minutes, 60)
+    parts = ([f"{h} hour{'s' if h != 1 else ''}"] if h else []) + ([f"{m} minutes"] if m else [])
+    return " ".join(parts) or "0 minutes"
+
+
 def option_ask_text(snap, requester: str, ask: dict[str, Any], own_task: dict[str, Any], own_start: int) -> str:
     """Template wording of a specific neighbor request (also given to the model as a hint)."""
     tasks = tasks_by_id(snap)
     t = tasks[ask["task_id"]]
     minutes = (ask["to_slot"] - ask["from_slot"]) * snap.get("slot_minutes", 15)
-    shift = f"{abs(minutes)} minutes {'later' if minutes > 0 else 'earlier'}"
+    shift = f"{_span(abs(minutes))} {'later' if minutes > 0 else 'earlier'}"
     finish = slot_to_time(ask["to_slot"] + t["duration_slots"])
     return (
         f"{home_name(snap, ask['home_id'])}, could your {label(t)} start {shift}, at {slot_to_time(ask['to_slot'])}? "
