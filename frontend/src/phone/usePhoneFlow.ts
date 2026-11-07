@@ -1,7 +1,7 @@
 // Request → job → confirmation → applied flow for one phone (PRD §11, §16).
 // Uses B's api.message / api.action and useJob for job polling.
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, useJob, type Api } from '../api';
+import { ApiError, useJobState, type Api } from '../api';
 import type { HomeId, NeighborhoodState, PendingChange } from '../types';
 
 export type FlowPhase =
@@ -76,7 +76,7 @@ export function usePhoneFlow(
   refresh: () => void,
 ) {
   const [flow, setFlow] = useState<FlowState>(IDLE);
-  const job = useJob(api, flow.jobId);
+  const { job, error: jobError } = useJobState(api, flow.jobId);
   const generation = state?.generation;
 
   // A reset (generation bump) or household switch drops any in-flight flow.
@@ -84,7 +84,14 @@ export function usePhoneFlow(
     setFlow(IDLE);
   }, [generation, homeId]);
 
-  // Follow the job B's useJob is polling.
+  // The job vanished (404, e.g. after a reset): stop waiting and say so.
+  useEffect(() => {
+    if (jobError?.code !== 'NOT_FOUND' || !flow.jobId) return;
+    refresh();
+    setFlow({ ...IDLE, phase: 'failed', message: errorText(jobError) });
+  }, [jobError, flow.jobId, refresh]);
+
+  // Follow the job B's useJobState is polling.
   useEffect(() => {
     if (!job || job.id !== flow.jobId) return;
     const kind = flow.kind ?? 'message';

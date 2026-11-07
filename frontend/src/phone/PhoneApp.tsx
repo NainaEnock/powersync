@@ -377,8 +377,7 @@ function PlanCard({ homeId, state, replanning }: { homeId: HomeId; state: Neighb
   const { entries, coordinated } = currentSchedule(state);
   const tasks = state.tasks.filter((t) => t.home_id === homeId);
   const t = slotToTime;
-  // contract §3 ADDED field; read safely until B adds plan_name to types.ts Coordination.
-  const planName = (state.coordination as { plan_name?: string | null } | null)?.plan_name ?? null;
+  const planName = state.coordination?.plan_name ?? null;
   return (
     <section className="ps-card">
       <div className="ps-card-head">
