@@ -30,7 +30,7 @@ All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.
 | `GET /api/health` | none | | `{status, version, scenario_id, revision, generation, auth_mode, agent_impl, openrouter_configured, model}` |
 | `GET /api/state` | admin | | Dashboard view (§3) |
 | `GET /api/state?home=A` | A's token or admin | | Household view (§4) |
-| `POST /api/message` | home | `{"home_id":"A","text":"…","request_id":"phone-a-<uuid>","expected_revision":3}` | `202 {job_id, status, accepted_revision}` |
+| `POST /api/message` | home | `{"home_id":"A","text":"…","request_id":"phone-a-<uuid>","expected_revision":3,"reply_to_event_id":null}` | `202 {job_id, status, accepted_revision}` |
 | `POST /api/action` | home | `{"home_id":"A","action":"confirm_change"\|"reject_change","pending_change_id":"pc-…","request_id":"phone-a-<uuid>","expected_revision":4}` | `202 {job_id, status, accepted_revision}` |
 | `POST /api/coordinate` | admin | `{}` | `202 {job_id, status, accepted_revision}` |
 | `POST /api/tariff` | admin | `{"tariff_mode":"tou"\|"flat"}` | `200 {revision, tariff_mode}` |
@@ -50,7 +50,7 @@ All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.
 |---|---|---|
 | message | `queued → running (stage) →` | `awaiting_confirmation` / `proposed_change` (+ `pending_change_id`) |
 | | | `completed` / `infeasible` (+ `pending_change_id`, `infeasible_reasons`) |
-| | | `completed` / `needs_clarification` (`message` is the agent's question) |
+| | | `completed` / `needs_clarification` (`message` is the agent's question); `result.clarify = {question_event_id, choices}` with up to 4 tap-to-answer replies. The phone answers by posting `/api/message` with `reply_to_event_id = question_event_id`; the backend reads the answer together with the original request. A reply to an unknown, answered, or other home's question is treated as a fresh request. |
 | | | `completed` / `no_change` (nothing understood or nothing to change) |
 | | | `failed` / `error`, `error: "BAD_MODEL_OUTPUT: …"` (agent named another home's or an unknown appliance) |
 | | after the resident confirms or rejects | the message job flips to `completed` / `applied` or `rejected` |

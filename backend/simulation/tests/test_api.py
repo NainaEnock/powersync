@@ -505,3 +505,36 @@ def test_appliance_edge_cases(monkeypatch):
         assert c.post("/api/appliances", json={"home_id": "A", "action": "remove", "task_id": "a_washer"}).status_code == 200
         assert add("A", "washer", 12).status_code == 200
         assert next(t for t in c.get("/api/state").json()["tasks"] if t["id"] == "a_washer")["deadline_slot"] == 12
+
+
+def test_answering_a_clarifying_question(monkeypatch):
+    """The phone's answer box: the reply is read together with the original request."""
+    seen = []
+
+    async def interpret(ctx, emit):
+        seen.append(ctx.text)
+        if "The resident answered" not in ctx.text:
+            return InterpretResult(outcome="needs_clarification", source="live", message_source="model",
+                                   message="Should the dryer be finished by 10:00 PM, or just started by then?",
+                                   choices=["Finished by 10:00 PM", "Started by 10:00 PM"])
+        assert "dryer by 10" in ctx.text and "Finished" in ctx.text
+        return InterpretResult(outcome="edits", source="live",
+                               edits=[{"task_id": "b_dryer", "field": "deadline_slot", "new_value": 16}])
+
+    with make_client(monkeypatch, interpret=interpret) as c:
+        q = wait_job(c, send(c, "B", "dryer by 10", "q1")["job_id"])
+        assert q["result"]["outcome"] == "needs_clarification"
+        clar = q["result"]["clarify"]
+        assert clar["choices"] == ["Finished by 10:00 PM", "Started by 10:00 PM"]
+        # Another home can't answer B's question: it's read as a fresh request.
+        r = c.post("/api/message", json={"home_id": "A", "text": "Finished", "request_id": "x1",
+                                         "reply_to_event_id": clar["question_event_id"]})
+        wait_job(c, r.json()["job_id"])
+        assert seen[-1] == "Finished"
+        r = c.post("/api/message", json={"home_id": "B", "text": "Finished", "request_id": "q2",
+                                         "reply_to_event_id": clar["question_event_id"]})
+        a = wait_job(c, r.json()["job_id"])
+        assert a["status"] == "awaiting_confirmation"
+        events = c.get("/api/state?home=B").json()["events"]
+        answer = next(e for e in events if e["type"] == "request" and e["text"] == "Finished")
+        assert answer["reply_to_event_id"] == clar["question_event_id"]  # the resident sees only their own words

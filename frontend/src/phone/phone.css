@@ -440,6 +440,31 @@
   cursor: pointer;
   min-height: 40px;
 }
+.ps-answer {
+  border: 2px solid var(--ps-home);
+}
+.ps-answer h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ps-answer h2 svg {
+  width: 20px;
+  height: 20px;
+  color: var(--ps-home);
+}
+.ps-answer-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+.ps-answer-choice {
+  border: 2px solid var(--ps-home);
+  color: var(--ps-home);
+  white-space: normal;
+  line-height: 1.2;
+  padding: 8px 12px;
+}
 .ps-picker {
   display: grid;
   gap: 8px;

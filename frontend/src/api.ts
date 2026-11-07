@@ -128,7 +128,8 @@ export interface Api {
   health(): Promise<Health>
   /** Dashboard view when home is omitted (admin token), household view with ?home=. */
   state(home?: HomeId, signal?: AbortSignal): Promise<NeighborhoodState>
-  message(home: HomeId, text: string, expectedRevision: number, requestId?: string): Promise<JobAccepted>
+  /** replyToEventId answers the agent's clarifying question; the backend reads it with the original request. */
+  message(home: HomeId, text: string, expectedRevision: number, requestId?: string, replyToEventId?: string): Promise<JobAccepted>
   action(
     home: HomeId,
     action: 'confirm_change' | 'reject_change',
@@ -176,11 +177,13 @@ export function createApi(mode: DataMode = getDataMode()): Api {
       home
         ? request<NeighborhoodState>(`/api/state?home=${home}`, { token: homeTok(home) || admin(), signal })
         : request<NeighborhoodState>('/api/state', { token: admin(), signal }),
-    message: (home, text, expected_revision, request_id = newRequestId(`phone-${home.toLowerCase()}`)) =>
+    message: (home, text, expected_revision, request_id = newRequestId(`phone-${home.toLowerCase()}`), reply_to_event_id) =>
       request<JobAccepted>('/api/message', {
         method: 'POST',
         token: homeTok(home),
-        body: { home_id: home, text, request_id, expected_revision },
+        body: reply_to_event_id
+          ? { home_id: home, text, request_id, expected_revision, reply_to_event_id }
+          : { home_id: home, text, request_id, expected_revision },
       }),
     action: (home, action, pending_change_id, expected_revision, request_id = newRequestId(`phone-${home.toLowerCase()}`)) =>
       request<JobAccepted>('/api/action', {

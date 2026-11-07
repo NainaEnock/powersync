@@ -191,7 +191,7 @@ def create_app() -> FastAPI:
         busy = [j for j in s.active_jobs() if j.kind == "message" and j.home_id == body.home_id]
         if busy:
             raise StoreError(409, "JOB_RUNNING", "Your last request is still being read. Try again in a moment.")
-        job = s.submit_message(body.home_id, body.text.strip(), body.request_id)
+        job = s.submit_message(body.home_id, body.text.strip(), body.request_id, body.reply_to_event_id)
         return {"job_id": job.id, "status": job.status, "accepted_revision": s.revision}
 
     @app.post("/api/action", status_code=202)
