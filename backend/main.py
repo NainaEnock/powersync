@@ -267,6 +267,8 @@ def create_app() -> FastAPI:
             if path and f.is_file() and DIST.resolve() in f.parents:
                 headers = no_cache if f.name in ("sw.js", "manifest.webmanifest", "index.html") or f.name.startswith("workbox-") else None
                 return FileResponse(f, headers=headers)
+            if "." in path.rsplit("/", 1)[-1]:  # a missing file (e.g. /icons/icon-192.png): 404, never HTML
+                raise StoreError(404, "NOT_FOUND", f"No file /{path}.")
             return FileResponse(DIST / "index.html", headers=no_cache)
 
     return app
