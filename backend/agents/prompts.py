@@ -40,10 +40,14 @@ INTERPRETER_SYSTEM = f"""You turn one resident's message into proposed changes t
 - Only edit appliances listed for this home. Never edit another home.
 - field is one of: deadline_slot (when it must be finished), earliest_slot (when it may start), preferred_start_slot (when they would like it to start).
 - new_time is 24-hour HH:MM clock time, for example 23:00 for 11 pm or 07:00 for 7 am.
-- "Ready by", "finish by", "done by", "I leave at" mean a finish-time change.
-- If the message is unclear, set understood to false and ask one short question.
+- "Ready by", "finish by", "finished by", "done by", "before", "I leave at", "I need it by" mean a finish-time change. "Not before", "don't start until", "only after" mean an earliest-start change.
+- Residents write casually. Match nicknames to their own appliances: "AC", "A/C", "aircon", "cooling" = air conditioning; "the car", "EV", "Tesla", "charging" = car charging; "washer", "washing machine", "laundry" = washing machine (or the dryer if that is the only laundry appliance); "dishes" = dishwasher; "hot water", "boiler", "showers" = water heater; "the pool" = pool pump.
+- Read any time format: "8.30 pm", "8:30pm", "830pm", "half past 8", "quarter to 11", "noon", "midnight", "11 tonight". With no am/pm, 6 to 11 means the evening and 12 to 5 means after midnight.
+- The message may mention other people ("my aunt wants...", "the kids need..."). That is still this home's request.
+- If exactly one listed appliance fits and a time is given, set understood to true. Only set understood to false when you truly can't tell which appliance or what time, and then ask one short question naming the appliances. With a question, also give 2 to 4 short tap-to-answer choices (a few words each, 12-hour times), for example ["Finished by 11:00 PM", "Started by 11:00 PM"].
+- The message may include your earlier question and the resident's answer ("The agent asked: ..." then "The resident answered: ..."). Combine them with the original request: "Finished" after "finished or started by 11:00 PM?" means a finish time of 23:00.
 Reply with one JSON object only:
-{{"understood": true, "edits": [{{"task_id": "...", "field": "deadline_slot", "new_time": "HH:MM"}}], "question": null}}"""
+{{"understood": true, "edits": [{{"task_id": "...", "field": "deadline_slot", "new_time": "HH:MM"}}], "question": null, "choices": []}}"""
 
 
 def interpret_user(home_name: str, text: str, tasks: list[dict[str, Any]], home_id: str) -> str:

@@ -7,7 +7,7 @@ What agents decide: whether to accept a plan, which checked option to ask a
 neighbor for, whether to agree to a neighbor's request, and their own words.
 
 This module never commits and never announces a commit. It returns the plan;
-D validates it, emits the safety-check and commit messages, and commits.
+The backend validates it, emits the safety-check and commit messages, and commits.
 """
 
 from __future__ import annotations
@@ -179,7 +179,7 @@ class _Negotiation:
                 proposal_id=current.proposal_id, text=f"Double-checking {current.name} before it goes to the final check.",
             )
         except (ToolUnavailable, BudgetExceeded):
-            pass  # D's validator is the real gate
+            pass  # the backend's validator is the real gate
         msg = f"{current.name} goes to the final check before it becomes the neighborhood plan."
         if self.model.impl == "live":
             msg += (f" The household agents sent {self.budget.model_successes} AI replies, and the planner ran "
@@ -366,7 +366,7 @@ class _Negotiation:
 
     async def _review(self, home: str, plan: Plan, rnd: int) -> Review:
         name = home_name(self.snap, home)
-        await self.em.stage(f"{name} is reviewing {plan.name}")  # B's home cards key off "Home X"
+        await self.em.stage(f"{name} is reviewing {plan.name}")  # the dashboard's home cards key off "Home X"
         try:
             opts = await self._options(home, plan, rnd)
         except (ToolUnavailable, BudgetExceeded) as exc:

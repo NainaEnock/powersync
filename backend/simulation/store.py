@@ -91,6 +91,8 @@ class Store:
         self.jobs: dict[str, Job] = {}
         self.job_tasks: dict[str, asyncio.Task] = {}
         self.request_index: dict[tuple[str, str], str] = {}
+        # Open clarifying questions: question event id -> {home_id, context (what the agent read), question}.
+        self.clarifications: dict[str, dict[str, str]] = {}
         self.activity: Optional[str] = None
         self.mutation_job_id: Optional[str] = None
         both_live = self.agent_impl.get("coordinate") == "live" and self.openrouter_configured
@@ -214,18 +216,35 @@ class Store:
 
     # ------------------------------------------------------------ message (interpret)
 
-    def submit_message(self, home_id: str, text: str, request_id: str) -> Job:
+    def submit_message(self, home_id: str, text: str, request_id: str, reply_to: Optional[str] = None) -> Job:
         job = self.new_job("message", home_id, request_id)
-        self._spawn(job, self._run_message(job, home_id, text, request_id))
+        self._spawn(job, self._run_message(job, home_id, text, request_id, reply_to))
         return job
 
-    async def _run_message(self, job: Job, home_id: str, text: str, request_id: str) -> None:
+    def _with_question(self, home_id: str, answer: str, reply_to: Optional[str]) -> tuple[str, Optional[str]]:
+        """An answer to this home's open clarifying question is read together with the original
+        request. Returns (text for the interpreter, question event id or None)."""
+        c = self.clarifications.get(reply_to or "")
+        if not c or c["home_id"] != home_id:
+            return answer, None  # unknown, another home's, or already answered: a fresh request
+        for k in [k for k, v in self.clarifications.items() if v["home_id"] == home_id]:
+            del self.clarifications[k]
+        text = f'{c["context"]}\nThe agent asked: "{c["question"]}"\nThe resident answered: "{answer}"'
+        return text[-1800:], reply_to
+
+    async def _run_message(self, job: Job, home_id: str, text: str, request_id: str,
+                           reply_to: Optional[str] = None) -> None:
         gen = self.generation
         emit = self.make_emit(job, gen)
         job.status, job.stage, job.updated_at = "running", "Understanding your request", now()
+        read_text, answered = self._with_question(home_id, text, reply_to)
+        if not answered:  # a new request closes any question this home left unanswered
+            for k in [k for k, v in self.clarifications.items() if v["home_id"] == home_id]:
+                del self.clarifications[k]
         req_eid = self.emit_system(job, sender=f"resident_{home_id}", recipient=f"agent_{home_id}",
-                                   type="request", text=text, data={"origin": "resident"})
-        ctx = InterpretContext(job_id=job.id, home_id=home_id, text=text, request_id=request_id,
+                                   type="request", text=text, reply_to_event_id=answered,
+                                   data={"origin": "resident", "answers_question": answered})
+        ctx = InterpretContext(job_id=job.id, home_id=home_id, text=read_text, request_id=request_id,
                                request_event_id=req_eid, snapshot=self.snapshot())
         timeout = env_float("POWERSYNC_AGENT_TIMEOUT_S", 30.0)
         result: Optional[InterpretResult] = None
@@ -246,24 +265,29 @@ class Store:
             result = await stub_interpret(ctx, emit)
         if gen != self.generation:
             return
-        self._finish_interpretation(job, home_id, request_id, req_eid, result)
+        self._finish_interpretation(job, home_id, request_id, req_eid, result, read_text)
 
     def _finish_interpretation(self, job: Job, home_id: str, request_id: str, req_eid: str,
-                               result: InterpretResult) -> None:
+                               result: InterpretResult, read_text: str = "") -> None:
         snap = self.snapshot()
         tasks = snap.task_map()
         agent_source = result.message_source
 
-        def reply(text: str, typ: str = "info") -> None:
-            self.emit_system(job, sender=f"agent_{home_id}", recipient=f"resident_{home_id}", type=typ,
+        def reply(text: str, typ: str = "info") -> str:
+            return self.emit_system(job, sender=f"agent_{home_id}", recipient=f"resident_{home_id}", type=typ,
                              text=text, reply_to_event_id=req_eid, source=agent_source if typ == "info" else "system_template")
 
         if result.outcome != "edits" or not result.edits:
             msg = result.message or ("That can't be done: " + " ".join(result.infeasible_reasons)
                                      if result.infeasible_reasons else "There's nothing to change in your plan.")
-            reply(msg)
+            q_eid = reply(msg)
             outcome = result.outcome if result.outcome in ("infeasible", "needs_clarification") else "no_change"
-            self.finish(job, "completed", outcome, msg, infeasible_reasons=result.infeasible_reasons)
+            extra: dict[str, Any] = {}
+            if outcome == "needs_clarification":
+                # The phone shows an answer box under the question; its reply comes back with this id.
+                self.clarifications[q_eid] = {"home_id": home_id, "context": read_text or msg, "question": msg}
+                extra["clarify"] = {"question_event_id": q_eid, "choices": result.choices[:4]}
+            self.finish(job, "completed", outcome, msg, infeasible_reasons=result.infeasible_reasons, **extra)
             return
 
         # Validate model output against canonical tasks. Another home's task or unknown task -> reject.
@@ -507,7 +531,7 @@ class Store:
                     announced = True
                 except asyncio.CancelledError:
                     raise
-                except Exception as e:  # noqa: BLE001  fall back to D's template
+                except Exception as e:  # noqa: BLE001  fall back to the backend's template
                     print(f"[powersync] announce_commit failed: {type(e).__name__}: {e}", file=sys.stderr)
             if not announced:
                 c_text, c_views = commit_text(snap, plan_name, schedule, previous, baseline_after)

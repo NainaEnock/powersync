@@ -103,7 +103,7 @@ _shared: EnergyTools | None = None
 
 
 def get_energy_tools() -> EnergyTools:
-    """Process-wide client. D can `await get_energy_tools().start()` at startup
+    """Process-wide client. The backend can `await get_energy_tools().start()` at startup
     and `await get_energy_tools().close()` on shutdown."""
     global _shared
     if _shared is None:

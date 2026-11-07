@@ -64,7 +64,7 @@ class Home(BaseModel):
 
 
 class Snapshot(BaseModel):
-    """Everything the engine needs, built by the backend. JSON-serializable so C can pass it over MCP.
+    """Everything the engine needs, built by the backend. JSON-serializable so the agents can pass it over MCP.
 
     Model arguments never replace these fields: the backend builds every snapshot.
     """
@@ -154,6 +154,9 @@ class MessageBody(BaseModel):
     text: str = Field(min_length=1, max_length=1000)
     request_id: str = Field(min_length=1, max_length=128)
     expected_revision: Optional[int] = None
+    # Answering the agent's clarifying question: the id of that question's event. The backend reads the
+    # answer together with the original request, so "Finished" means "the AC finished by 11 PM".
+    reply_to_event_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class ActionBody(BaseModel):

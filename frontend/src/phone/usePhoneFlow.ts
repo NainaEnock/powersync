@@ -1,5 +1,5 @@
 // Request → job → confirmation → applied flow for one phone (PRD §11, §16).
-// Uses B's api.message / api.action and useJob for job polling.
+// Uses api.message / api.action and useJob for job polling.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, useJobState, type Api } from '../api';
 import type { HomeId, NeighborhoodState, PendingChange } from '../types';
@@ -25,9 +25,23 @@ export interface FlowState {
   quiet: boolean;
   message: string | null;
   error: ApiError | null;
+  /** With phase 'clarify': the agent's question to answer, with tap-to-answer choices. */
+  clarify: Clarify | null;
 }
 
-const IDLE: FlowState = { phase: 'idle', jobId: null, kind: null, quiet: false, message: null, error: null };
+export interface Clarify {
+  questionEventId: string;
+  choices: string[];
+}
+
+const IDLE: FlowState = { phase: 'idle', jobId: null, kind: null, quiet: false, message: null, error: null, clarify: null };
+
+function readClarify(result: unknown): Clarify | null {
+  const c = (result as { clarify?: { question_event_id?: unknown; choices?: unknown } } | null)?.clarify;
+  if (!c || typeof c.question_event_id !== 'string') return null;
+  const choices = Array.isArray(c.choices) ? c.choices.filter((x): x is string => typeof x === 'string').slice(0, 4) : [];
+  return { questionEventId: c.question_event_id, choices };
+}
 
 export function errorText(err: ApiError): string {
   switch (err.code) {
@@ -91,7 +105,7 @@ export function usePhoneFlow(
     setFlow({ ...IDLE, phase: 'failed', message: errorText(jobError) });
   }, [jobError, flow.jobId, refresh]);
 
-  // Follow the job B's useJobState is polling.
+  // Follow the job useJobState is polling.
   useEffect(() => {
     if (!job || job.id !== flow.jobId) return;
     const kind = flow.kind ?? 'message';
@@ -102,7 +116,7 @@ export function usePhoneFlow(
     }
     // Terminal or confirmation: pull fresh state so the plan / pending change matches.
     refresh();
-    // Outcomes (C, G3): proposed_change, infeasible, needs_clarification, no_change, error,
+    // Outcomes: proposed_change, infeasible, needs_clarification, no_change, error,
     // plus applied / rejected for confirm and reject jobs. result.message is code-written text.
     const outcome = job.result?.outcome ?? '';
     const msg = job.result?.message ?? null;
@@ -114,7 +128,8 @@ export function usePhoneFlow(
       if (job.status === 'awaiting_confirmation' || outcome === 'proposed_change')
         return { ...base, phase: 'confirm', message: msg };
       if (outcome.includes('infeasible')) return { ...base, phase: 'infeasible', message: msg };
-      if (outcome === 'needs_clarification') return { ...base, phase: 'clarify', message: msg };
+      if (outcome === 'needs_clarification')
+        return { ...base, phase: 'clarify', message: msg, clarify: readClarify(job.result) };
       if (outcome === 'no_change') return { ...base, phase: 'no_change', message: msg };
       if (outcome === 'error')
         return { ...base, phase: 'failed', message: msg ?? "Your agent couldn't understand that right now, so nothing was changed." };
@@ -139,12 +154,12 @@ export function usePhoneFlow(
 
   /** Returns true when the request was accepted (so the text box can clear). */
   const send = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, replyToEventId?: string): Promise<boolean> => {
       const trimmed = text.trim();
       if (!homeId || !state || busy || !trimmed) return false;
       setFlow({ ...IDLE, phase: 'queued', kind: 'message' });
       try {
-        const res = await api.message(homeId, trimmed, state.revision);
+        const res = await api.message(homeId, trimmed, state.revision, undefined, replyToEventId);
         setFlow((f) => ({ ...f, jobId: res.job_id }));
         return true;
       } catch (e) {

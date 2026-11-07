@@ -1,8 +1,9 @@
-"""C's tests: real MCP stdio calls, stub/scripted models only (never the real key)."""
+"""Agent tests: real MCP stdio calls, stub/scripted models only (never the real key)."""
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import re
 
@@ -225,7 +226,7 @@ def test_model_dollar_amounts_replaced(snapshot):
 
 
 def test_third_person_trigger(snapshot):
-    """D's trigger shape: third-person text already written, no 'kind' key."""
+    """The backend's trigger shape: third-person text already written, no 'kind' key."""
     trigger = {"home_id": "A", "task_id": "a_ev", "field": "deadline_slot", "old_value": 28, "new_value": 20,
                "old_time": "1:00 AM", "new_time": "11:00 PM", "edits": [],
                "text": "Home A's resident changed their EV charging's finish time to 11:00 PM."}
@@ -306,7 +307,7 @@ def test_interpret_deadline_change(snapshot):
     assert edit == {"task_id": "a_ev", "field": "deadline_slot", "old_value": 28, "new_value": 20,
                     "old_time": "1:00 AM", "new_time": "11:00 PM"}
     assert "11:00 PM" in res["explanation"]
-    # D writes the reply to the resident; C only emits tool traffic here.
+    # The backend writes the reply to the resident; the interpreter only emits tool traffic here.
     assert all(e["type"].startswith("tool_") for e in rec.events)
 
 
@@ -415,3 +416,42 @@ def test_review_lists_appliances_in_plain_english():
     assert and_join(["dryer"]) == "dryer"
     assert and_join(["dryer", "dishwasher"]) == "dryer and dishwasher"
     assert and_join(["dryer", "dishwasher", "pool pump"]) == "dryer, dishwasher, and pool pump"
+
+
+def test_plain_words_reader_understands_casual_requests():
+    """Nicknames and everyday time formats map to the home's own appliances."""
+    from backend.agents.plainwords import read_request
+    tasks = [{"id": "b_dryer", "name": "Clothes dryer"}, {"id": "b_dish", "name": "Dishwasher"},
+             {"id": "b_washer", "name": "Washing machine"}, {"id": "b_ac", "name": "Air conditioning"}]
+    def read(text):
+        r = read_request(text, tasks)
+        return r.task_id, r.field, r.hhmm
+    assert read("My aunt ruby wants the washing machine finished by 8.30 pm") == ("b_washer", "deadline_slot", "20:30")
+    assert read("AC done by 10") == ("b_ac", "deadline_slot", "22:00")
+    assert read("aircon by half past 9") == ("b_ac", "deadline_slot", "21:30")
+    assert read("can the a/c finish by quarter to 11 pm") == ("b_ac", "deadline_slot", "22:45")
+    assert read("washer 830pm") == ("b_washer", "deadline_slot", "20:30")
+    assert read("dishes done before midnight") == ("b_dish", "deadline_slot", "00:00")
+    assert read("dryer by 1 tonight") == ("b_dryer", "deadline_slot", "01:00")
+    assert read("don't start the dishwasher until 10pm") == ("b_dish", "earliest_slot", "22:00")
+    assert read("my 7.2 kW thing")[2] is None
+    r = read_request("laundry by 11 tonight", tasks)  # dryer and washer both fit: ask
+    assert r.task_id is None and set(r.choices) == {"b_dryer", "b_washer"}
+
+
+def test_interpret_falls_back_to_plain_words_when_model_unsure(snapshot):
+    """If the live model says it didn't understand a clear request, code reads it and the resident confirms."""
+    snap = copy.deepcopy(snapshot)
+    snap["tasks"].append({"id": "b_washer", "home_id": "B", "name": "Washing machine", "power_kw": 0.5,
+                          "duration_slots": 4, "earliest_slot": 0, "deadline_slot": 20,
+                          "preferred_start_slot": 2, "interruptible": False})
+    unsure = ScriptedModel(lambda m, t: {"understood": False, "edits": [], "question": None})
+    res, _ = run(_interpret(snap, "B", "My aunt ruby wants the washing machine finished by 8.30 pm", unsure))
+    assert res["outcome"] == "proposed_change" and res["read_by"] == "rules"
+    (edit,) = res["proposed_edits"]["edits"]
+    assert edit["task_id"] == "b_washer" and edit["new_time"] == "8:30 PM"
+    # Half-understood messages get a specific question instead of a generic one.
+    res, _ = run(_interpret(snap, "B", "the washing machine please", unsure))
+    assert res["outcome"] == "needs_clarification"
+    assert res["message"] == "What time should your washing machine be done by? Right now it's 11:00 PM."
+    assert res["choices"] == ["10:00 PM", "12:00 AM", "1:00 AM", "6:00 AM"]  # not the time it already has

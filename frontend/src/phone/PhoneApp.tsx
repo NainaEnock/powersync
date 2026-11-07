@@ -3,7 +3,7 @@
 //   <PhoneApp homeId={homeId} api={api} />            phone polls its own state
 //   <PhoneApp homeId={homeId} api={api} state={polled} />  or B passes usePoll() output
 //
-// homeId comes from /phone?home=X (B's App.tsx). If null, the phone uses the
+// homeId comes from /phone?home=X (App.tsx). If null, the phone uses the
 // household last chosen on this device, or shows the picker.
 // State is GET /api/state?home=X, already filtered by the server (PRD §11.3).
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
@@ -18,6 +18,7 @@ import {
   Info,
   KeyRound,
   Loader2,
+  MessageCircleReply,
   Send,
   Shirt,
   Utensils,
@@ -41,7 +42,7 @@ import {
   type Task,
 } from '../types';
 import { applianceNoun, editFieldPhrase, formatKwh, formatUsd } from './format';
-import { errorText, usePhoneFlow, type FlowState } from './usePhoneFlow';
+import { errorText, usePhoneFlow, type Clarify, type FlowState } from './usePhoneFlow';
 import { AppliancesCard } from './AppliancesCard';
 import './phone.css';
 
@@ -85,7 +86,7 @@ function rememberHome(home: HomeId | null) {
 export interface PhoneAppProps {
   homeId: HomeId | null;
   api: Api;
-  /** Optional: B's usePoll(api.state(homeId)) result. If omitted the phone polls itself. */
+  /** Optional: a usePoll(api.state(homeId)) result. If omitted the phone polls itself. */
   state?: Polled<NeighborhoodState>;
 }
 
@@ -239,6 +240,9 @@ function PhoneHome({
               (c) => c.home_id === homeId && c.status === 'pending' && !c.feasible,
             )}
           />
+          {flow.phase === 'clarify' && flow.clarify && (
+            <AnswerBox key={flow.clarify.questionEventId} clarify={flow.clarify} busy={busy} onSend={send} />
+          )}
           <RequestBox homeId={homeId} busy={busy} onSend={send} />
           <Messages homeId={homeId} state={state} />
         </>
@@ -480,7 +484,7 @@ function ChangeCards({
           <section key={c.id} className="ps-card ps-confirm" aria-live="polite">
             <h2>Confirm a change</h2>
             <p className="ps-question">{changeQuestion(c, state.tasks)}</p>
-            {/* D's default explanation is the same question in other words; only show extra context. */}
+            {/* The backend's default explanation is the same question in other words; only show extra context. */}
             {c.explanation && !c.explanation.trim().startsWith('Change ') && (
               <p className="ps-muted">{c.explanation}</p>
             )}
@@ -584,6 +588,62 @@ function FlowStatus({
         )}
       </div>
       {detail && detail !== headline && <div className="ps-muted">{detail}</div>}
+    </section>
+  );
+}
+
+/* ---------------- answer the agent's question ---------------- */
+
+// Shown under the agent's clarifying question. The answer goes back with the question's id, so the
+// agent reads it together with the original request ("Finished" -> the AC finished by 11:00 PM).
+function AnswerBox({
+  clarify,
+  busy,
+  onSend,
+}: {
+  clarify: Clarify;
+  busy: boolean;
+  onSend: (t: string, replyTo?: string) => Promise<boolean>;
+}) {
+  const [text, setText] = useState('');
+  const answer = async (value: string) => {
+    if (await onSend(value, clarify.questionEventId)) setText('');
+  };
+  return (
+    <section className="ps-card ps-answer">
+      <h2>
+        <MessageCircleReply aria-hidden /> Answer your agent
+      </h2>
+      {clarify.choices.length > 0 && (
+        <div className="ps-answer-choices">
+          {clarify.choices.map((c) => (
+            <button key={c} className="ps-btn ps-answer-choice" disabled={busy} onClick={() => void answer(c)}>
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
+      <form
+        className="ps-request"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void answer(text);
+        }}
+      >
+        <input
+          className="ps-input"
+          maxLength={300}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          enterKeyHint="send"
+          placeholder={clarify.choices.length ? 'Or type your answer' : 'Type your answer'}
+          disabled={busy}
+          aria-label="Your answer"
+        />
+        <button type="submit" className="ps-btn ps-primary ps-send" disabled={busy || !text.trim()} aria-label="Send answer">
+          {busy ? <Loader2 className="ps-spin" aria-hidden /> : <Send aria-hidden />}
+        </button>
+      </form>
     </section>
   );
 }

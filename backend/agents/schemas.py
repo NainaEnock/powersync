@@ -19,6 +19,7 @@ class InterpretOutput(BaseModel):
     understood: bool
     edits: list[InterpretEdit] = Field(default_factory=list, max_length=4)
     question: str | None = None
+    choices: list[str] = Field(default_factory=list, max_length=6)  # tap-to-answer replies to the question
 
 
 class ReviewOutput(BaseModel):

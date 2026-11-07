@@ -1,7 +1,7 @@
 """Model stand-ins that never touch the network.
 
 `ScriptedModel` lets tests decide each reply. `RuleStubModel` is the labeled
-`stub` agent D can run with no OpenRouter key: it reads the same prompts and
+`stub` agent the backend can run with no OpenRouter key: it reads the same prompts and
 answers with simple rules, and every event it produces is marked as
 code-written (`source: system_template`, `data.agent_impl: stub`).
 """
@@ -79,35 +79,15 @@ def rule_responder(messages, tools):
     raise ModelUnavailable(f"stub: unknown prompt kind {kind!r}")
 
 
-_TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)", re.I)
-
-
 def _rule_interpret(meta: dict[str, Any]) -> dict[str, Any]:
-    text = meta["text"].lower()
-    m = _TIME.search(text)
-    if not m:
+    from .plainwords import read_request, without_questions
+    tasks = [{"id": t["id"], "name": t.get("label", t["id"])} for t in meta["tasks"]]
+    r = read_request(without_questions(meta["text"]), tasks)
+    if r.complete:
+        return {"understood": True, "edits": [{"task_id": r.task_id, "field": r.field, "new_time": r.hhmm}],
+                "question": None}
+    if not r.hhmm:
         return {"understood": False, "edits": [], "question": "What time do you need it done by?"}
-    h = int(m.group(1)) % 12 + (12 if m.group(3).startswith("p") else 0)
-    hhmm = f"{h:02d}:{int(m.group(2) or 0):02d}"
-    words = {
-        "car": ("ev", "car", "charg"), "dryer": ("dryer",), "dishwasher": ("dish",),
-        "washing machine": ("washing machine", "washer"),
-        "water heater": ("water heater", "hot water", "heater"),
-        "air conditioning": ("air conditioning", "air con", "a/c", " ac ", "cooling"),
-        "pool pump": ("pool", "pump"),
-    }
-    padded = f" {text} "
-    for task in meta["tasks"]:
-        label = task["label"]
-        keys = next((v for k, v in words.items() if k in label), (label,))
-        # "dishwasher" contains "washer": only the dishwasher may claim it.
-        hay = padded if "dish" in label else padded.replace("dishwasher", "")
-        if any(k in hay for k in keys):
-            return {
-                "understood": True,
-                "edits": [{"task_id": task["id"], "field": "deadline_slot", "new_time": hhmm}],
-                "question": None,
-            }
     return {"understood": False, "edits": [], "question": "Which appliance is this about?"}
 
 

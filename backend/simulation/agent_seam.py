@@ -1,7 +1,7 @@
-"""The seam between D's backend and C's agents (see docs/contract.md, "Agent seam").
+"""The seam between the backend and the agents (see docs/contract.md, "Agent interface").
 
-C exports interpret_request, coordinate_neighborhood, and (optionally) announce_commit from
-backend.agents (signatures in the "C's interface" section below). The backend wraps them into
+The agents package exports interpret_request, coordinate_neighborhood, and (optionally) announce_commit from
+backend.agents (signatures in the "Agent interface" section below). The backend wraps them into
 the internal InterpretFn / CoordinateFn forms; if they are missing it uses the labeled stubs below.
 POWERSYNC_AGENT_IMPL=stub forces the stubs (tests always do this, to protect the quota).
 
@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import inspect
 import os
-import re
 import sys
 from typing import Any, Awaitable, Callable, Literal, Optional
 
@@ -56,8 +55,10 @@ class InterpretResult(BaseModel):
     # Who wrote the text shown to the resident: only a model-written clarifying question is "model".
     message_source: Literal["model", "system_template"] = "system_template"
     # The interpreter's own verdict on its edits (True: "Change ...?", False: "I can't ..."), if it gave one.
-    # D's engine decides; the interpreter's explanation is shown only when the two agree.
+    # The engine decides; the interpreter's explanation is shown only when the two agree.
     claimed_feasible: Optional[bool] = None
+    # With needs_clarification: up to 4 short tap-to-answer replies for the phone ("Finished by 11:00 PM").
+    choices: list[str] = Field(default_factory=list)
 
 
 class CoordinateContext(BaseModel):
@@ -81,7 +82,7 @@ class CoordinateResult(BaseModel):
     rounds: int = 0
     model_calls: int = 0
     tool_calls: int = 0
-    raw: dict[str, Any] = Field(default_factory=dict)  # C's original result, passed back to announce_commit
+    raw: dict[str, Any] = Field(default_factory=dict)  # the agents' original result, passed back to announce_commit
 
 
 InterpretFn = Callable[[InterpretContext, Emit], Awaitable[InterpretResult]]
@@ -90,50 +91,25 @@ CoordinateFn = Callable[[CoordinateContext, Emit], Awaitable[CoordinateResult]]
 
 # ------------------------------------------------------------------ stub interpreter
 
-_TIME = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)", re.I)
-# (words the resident might say, words in the appliance's name). Order matters: "dishwasher" before "washer".
-_WORDS = [
-    (("car", " ev", "ev ", "charg", "vehicle"), ("ev ", "car")),
-    (("dryer",), ("dryer",)),
-    (("dish",), ("dishwasher",)),
-    (("washing", "washer", "laundry"), ("washing",)),
-    (("water heater", "hot water"), ("water heater",)),
-    (("air con", " ac ", "a/c", "cooling"), ("air conditioning",)),
-    (("pool",), ("pool",)),
-]
-
-
-def _find_task(snap: Snapshot, home_id: str, text: str) -> Optional[str]:
-    """Match the resident's words to one of their own appliances by name (works for added appliances too)."""
-    low = f" {text.lower()} "
-    own = [t for t in snap.tasks if t.home_id == home_id]
-    for said, named in _WORDS:
-        if any(w in low for w in said):
-            for t in own:
-                if any(n in f"{t.name.lower()} " for n in named):
-                    return t.id
-    return None
-
-
 async def stub_interpret(ctx: InterpretContext, emit: Emit) -> InterpretResult:
-    """Keyword parser: '<appliance> ... by/before <time>' -> a deadline edit. Labeled stub."""
-    m = _TIME.search(ctx.text)
-    tid = _find_task(ctx.snapshot, ctx.home_id, ctx.text)
-    if not m or not tid:
+    """Keyword reader for everyday wording ("AC done by 10", "washing machine finished by 8.30 pm").
+    Labeled stub. Shares the agents' plain-words reader so the backup understands the same phrasing."""
+    from backend.agents.plainwords import read_request
+    from backend.agents.plainwords import without_questions
+    own = [{"id": t.id, "name": t.name} for t in ctx.snapshot.tasks if t.home_id == ctx.home_id]
+    r = read_request(without_questions(ctx.text), own)
+    if not r.complete or r.time is None:
         return InterpretResult(
             outcome="no_change", source="stub",
-            message="The simple backup reader couldn't find an appliance and a finish time in that. "
+            message="The simple backup reader couldn't find an appliance and a time in that. "
                     "Try something like \"Have my car ready by 11 pm.\"",
         )
-    hour, minute = int(m.group(1)), int(m.group(2) or 0)
-    if not 1 <= hour <= 12 or minute > 59:
-        return InterpretResult(outcome="no_change", source="stub", message="That time doesn't look right.")
-    pm = m.group(3).lower().startswith("p")
-    h24 = (hour % 12) + (12 if pm else 0)
-    slot = clock_to_slot(h24, minute, as_deadline=True)
+    slot = clock_to_slot(r.time.hour, r.time.minute, as_deadline=r.field == "deadline_slot")
+    if r.field != "deadline_slot" and r.time.minute % 15:
+        slot += 1  # a start time rounds up to the next quarter hour
     return InterpretResult(
         outcome="edits", source="stub",
-        edits=[EditRequest(task_id=tid, field="deadline_slot", new_value=slot)],
+        edits=[EditRequest(task_id=r.task_id, field=r.field, new_value=slot)],
         explanation="",  # the backend writes the confirmation text from the edit
     )
 
@@ -166,15 +142,15 @@ async def stub_coordinate(ctx: CoordinateContext, emit: Emit) -> CoordinateResul
     )
 
 
-# ------------------------------------------------------------------ C's interface (feat/agents-mcp)
+# ------------------------------------------------------------------ Agent interface
 #
-# C exports from backend.agents (or backend.agents.orchestrator):
+# The agents package exports from backend.agents (or backend.agents.orchestrator):
 #   interpret_request(snapshot: dict, home_id, text, emit, job_id=...) -> dict
 #       {outcome: proposed_change|infeasible|needs_clarification|no_change|error,
 #        proposed_edits: {edits: [{task_id, field, new_value, ...}]}, explanation, message, infeasible_reasons}
 #   coordinate_neighborhood(snapshot: dict, emit, job_id=..., trigger=None|requirement_change) -> dict
 #       {schedule: [{task_id, start_slot, ...}], proposal_id, plan_name, source, explanation, home_views, ...}
-#   announce_commit(snapshot: dict, result: dict, emit, job_id=...)   (optional; D's template otherwise)
+#   announce_commit(snapshot: dict, result: dict, emit, job_id=...)   (optional; the backend's template otherwise)
 # Each may be sync or async. The backend re-validates everything they return.
 
 AnnounceFn = Callable[[Snapshot, CoordinateResult, Emit, str], Awaitable[None]]
@@ -210,17 +186,18 @@ def adapt_interpret(fn: Callable[..., Any]) -> InterpretFn:
             raise ValueError(f"unknown interpreter outcome {outcome!r}")
         claimed = {"proposed_change": True, "infeasible": False}.get(outcome)
         if mapped == "infeasible" and edits:
-            mapped = "edits"  # D's engine decides feasibility; the change card shows the reason
+            mapped = "edits"  # The engine decides feasibility; the change card shows the reason
         source = "stub" if out.get("source") in ("stub", "system_template") else "live"
         msg_src = out.get("message_source")
         if msg_src not in ("model", "system_template"):
-            # C's interpreter writes every reply from code templates except the clarifying question.
+            # The interpreter writes every reply from code templates except the clarifying question.
             msg_src = "model" if (mapped == "needs_clarification" and source == "live") else "system_template"
         return InterpretResult(
             outcome=mapped, edits=edits, explanation=str(out.get("explanation") or ""),
             message=str(out.get("message") or out.get("question") or ""),
             infeasible_reasons=[str(r) for r in out.get("infeasible_reasons") or []],
             source=source, message_source=msg_src, claimed_feasible=claimed,
+            choices=[str(c)[:60] for c in (out.get("choices") or [])][:4],
         )
     return interpret
 
@@ -281,9 +258,9 @@ def _find(name: str) -> Optional[Callable[..., Any]]:
 
 
 def load_agents() -> tuple[InterpretFn, CoordinateFn, dict[str, str], Optional[AnnounceFn]]:
-    """Return (interpret, coordinate, agent_impl, announce_commit). Falls back to D's stubs per function.
+    """Return (interpret, coordinate, agent_impl, announce_commit). Falls back to the backend's stubs per function.
 
-    agent_impl reports "live" only when C's function is present AND an OpenRouter key is configured.
+    agent_impl reports "live" only when the agent function is present AND an OpenRouter key is configured.
     """
     interpret: InterpretFn = stub_interpret
     coordinate: CoordinateFn = stub_coordinate

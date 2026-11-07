@@ -1,7 +1,7 @@
 # PowerSync: product requirements and six-hour build spec
 
 **Product name:** PowerSync
-**Team:** four people working in parallel (A phone, B dashboard and integration, C agents and MCP, D backend and engine)
+**Team:** four people working in parallel on the phone app, the dashboard and integration, the agents and MCP, and the backend and engine
 **Delivery:** three installed phone web apps, one live laptop dashboard, one shared backend
 **Event constraints:** six hours of hacking; five-minute presentation; one to two minutes of questions. Recheck organizer announcements.
 **Version:** v2, written 2026-11-07 after a full practice run. Supersedes the trial's "Gridmates" PRD.
@@ -81,18 +81,18 @@ Don't claim multi-agent demand coordination is new. Our difference is a clear, h
 
 Native iOS and Android builds, hardware, utility accounts, real billing, payments, solar trading, batteries, live forecasting, HVAC models, databases, vector stores, user registration, push notifications, 3D neighborhoods, and multi-day optimization. Don't add agent frameworks just to show more agent names.
 
-## 5. Team ownership
+## 5. Areas of work
 
-| Person | Owns | Deliverable |
+| Area | Files | Deliverable |
 |---|---|---|
-| A: phone | `frontend/src/phone/`, phone CSS and assets | The installed household app |
-| B: dashboard and integration | Repo, `frontend/` root config, routing, `api.ts`, `types.ts`, `fixtures.ts`, `frontend/src/dashboard/`, PWA config, tunnel, merges | Dashboard and the combined runnable product |
-| C: agents and MCP | `backend/agents/`, `backend/tools/` | OpenRouter loop, MCP server and client, negotiation, conversation text |
-| D: backend and engine | `backend/main.py`, `backend/simulation/`, `backend/data/`, `backend/requirements.txt`, `docs/contract.md` | API, state, job queue, engine, metrics, privacy filtering |
+| Phone | `frontend/src/phone/`, phone CSS and assets | The installed household app |
+| Dashboard and integration | Repo, `frontend/` root config, routing, `api.ts`, `types.ts`, `fixtures.ts`, `frontend/src/dashboard/`, PWA config, tunnel, merges | Dashboard and the combined runnable product |
+| Agents and MCP | `backend/agents/`, `backend/tools/` | OpenRouter loop, MCP server and client, negotiation, conversation text |
+| Backend and engine | `backend/main.py`, `backend/simulation/`, `backend/data/`, `backend/requirements.txt`, `docs/contract.md` | API, state, job queue, engine, metrics, privacy filtering |
 
-B is the integration lead, not everyone's implementer. Each owner fixes their own interface. D owns the canonical schema, and B mirrors it into TypeScript. Any change to a shared contract gets a short team post before anyone edits.
+Integration is not everyone's implementation. Each area fixes its own interface. The backend owns the canonical schema, and the frontend mirrors it into TypeScript. Any change to a shared contract gets a short team post before anyone edits.
 
-**Shared ownership:** C writes conversation wording. D stores and filters it. B and A display it. If wording is unclear on screen, tell C, not the person displaying it.
+**Shared ownership:** the agents write conversation wording. The backend stores and filters it. The phone and dashboard display it. If wording is unclear on screen, fix it in the agents, not in the display.
 
 ## 6. Stack
 
@@ -143,8 +143,7 @@ powersync/
   .env.example               (names only, no values)
   docs/
     PRD.md                   (this file)
-    team-schedule.md
-    contract.md              (D: confirmed fields and examples)
+    contract.md              (confirmed fields and examples)
   frontend/
     package.json, package-lock.json, vite.config.ts
     public/icons/
@@ -212,19 +211,19 @@ All tasks have earliest start slot 0, run without interruption, and use constant
 
 **Don't hard-code this result.** The engine must reach its first plan honestly, and the agents must find the improvement through a real objection and a real concession that the engine then evaluates.
 
-### 9.5 Expected values (from the trial engine; D re-verifies)
+### 9.5 Expected values (from the trial engine; re-verified by the backend)
 
 | Schedule | Energy charge | Peak | Over-limit slots |
 |---|---:|---:|---:|
 | Everyone at preferred times | $63.02 | 23.0 kW | 12 (3 hours) |
 | Everyone uses a cheap timer (all start at 9 PM) | $49.87 | 26.6 kW | yes, worst peak |
 | Engine's first plan | $50.85 | 13.2 kW | 0 |
-| After A moves to 9:45 PM (Plan 2) | $49.87 | 13.2 kW | 0 |
+| After Home A moves to 9:45 PM (Plan 2) | $49.87 | 13.2 kW | 0 |
 
 - Total energy is always **136.95 kWh** (tasks 50.55 + always-on 86.4) for every schedule.
 - Under the flat rate, every schedule costs **$24.65**, and the coordinated peak drops to 10.8 kW.
 - Plan 2 saves about $0.98 in total. Almost all of it is Home B's, and Home A pays nothing extra.
-- If a different tie-break in the new engine changes these numbers, D posts the new table and B updates labels. The property that must hold is that **the first engine plan puts B's dryer in expensive hours, and a concession by A fixes it.**
+- If a different tie-break in the new engine changes these numbers, the backend posts the new table and the dashboard updates its labels. The property that must hold is that **the first engine plan puts Home B's dryer in expensive hours, and a concession by Home A fixes it.**
 
 ### 9.6 Hand-checkable examples
 
@@ -234,7 +233,7 @@ All tasks have earliest start slot 0, run without interruption, and use constant
 
 ## 10. Canonical schemas
 
-D defines these in Pydantic first and B mirrors them in TypeScript. Field names are fixed. Money is modeled energy charge in USD, without fees or taxes.
+The backend defines these in Pydantic first and the frontend mirrors them in TypeScript. Field names are fixed. Money is modeled energy charge in USD, without fees or taxes.
 
 **Task:** `id`, `home_id`, `name`, `power_kw`, `duration_slots`, `earliest_slot`, `deadline_slot`, `preferred_start_slot`, `interruptible` (always false).
 
@@ -292,8 +291,8 @@ Confirming a change applies the edit and replans the neighborhood **in one job**
 
 - `Authorization: Bearer <token>`. Never put tokens in query strings, URLs, or logs.
 - Tokens come from `.env`: `DEMO_ADMIN_TOKEN`, `DEMO_HOME_A_TOKEN`, `DEMO_HOME_B_TOKEN`, `DEMO_HOME_C_TOKEN`.
-- **A blank token means that role is open** (dev mode). `health.auth_mode` reports `dev-open`, `partial`, or `enforced`, and **both UIs show it in the header badge.** The demo laptop must run `enforced`.
-- **Team rule from the trial:** during development everyone leaves tokens blank. Only the integration laptop sets them, starting at the G9 checkpoint. The trial's "works for A but not for me" bug was A on dev-open and B on enforced.
+- **A blank token means that access level is open** (dev mode). `health.auth_mode` reports `dev-open`, `partial`, or `enforced`, and **both UIs show it in the header badge.** The demo laptop must run `enforced`.
+- **Team rule from the trial:** during development everyone leaves tokens blank. Only the integration laptop sets them, starting at the G9 checkpoint. The trial's "works on one laptop but not another" bug came from one laptop on dev-open and another on enforced.
 
 ### 11.2 Errors
 
@@ -346,7 +345,7 @@ This was the most demo-visible feature in the trial and the one that was built l
 - `emit({"stage": "Home B is reviewing Plan 1"})` sets `state.activity`, which the dashboard shows as a live status line.
 - Household reviews run concurrently. Publish each home's review when it finishes, not after all three.
 
-### 12.2 Wording rules (C writes, everyone checks)
+### 12.2 Wording rules (the agents write, everyone checks)
 
 - Plain English a judge understands without explanation. No internal words like "candidate", "slot", "concession", "task_id", or "constraint satisfied".
 - **Every plan has a name and says what it is and how it differs.** For example:
@@ -372,14 +371,14 @@ Sort by `sequence`. Group by round. Tag each plan as "Plan 1" or "Plan 2". Show 
 
 - Endpoint: `POST https://openrouter.ai/api/v1/chat/completions`, with the server-side key as a bearer token.
 - Choose a **fast, tool-capable** model available to the event key from `https://openrouter.ai/api/v1/models`. **Copy the ID exactly.** A one-letter typo (`vidia/` for `nvidia/`) cost time in the trial.
-- **By 0:30, C times one real call** that includes a tool definition and a structured reply. If a household review takes over about 15 seconds, choose a faster model before building on it.
-- `health.model` shows the configured model, so B can confirm the laptop uses the right one.
+- **By 0:30, time one real call** that includes a tool definition and a structured reply. If a household review takes over about 15 seconds, choose a faster model before building on it.
+- `health.model` shows the configured model, so the team can confirm the laptop uses the right one.
 
 ### 13.2 Two kinds of AI work
 
-**A. Interpret resident requests.** Turn ordinary language into proposed structured edits. The phone asks for confirmation before any deadline changes. Resolve "11 pm tonight" against the scenario date, not the laptop clock.
+**1. Interpret resident requests.** Turn ordinary language into proposed structured edits. The phone asks for confirmation before any deadline changes. Resolve "11 pm tonight" against the scenario date, not the laptop clock.
 
-**B. Negotiate.** Each home reviews a plan for its own tasks, accepts or objects, and may offer or ask for allowed timing changes. The coordinator routes messages, and the engine builds the next plan. Agents may ask a resident to relax a deadline, but they never relax it silently.
+**2. Negotiate.** Each home reviews a plan for its own tasks, accepts or objects, and may offer or ask for allowed timing changes. The coordinator routes messages, and the engine builds the next plan. Agents may ask a resident to relax a deadline, but they never relax it silently.
 
 ### 13.3 Bounded negotiation sequence
 
@@ -393,7 +392,7 @@ Sort by `sequence`. Group by round. Tag each plan as "Plan 1" or "Plan 2". Show 
 
 **Third-person context.** When a job starts because Home A changed a deadline, tell the other agents "Home A's resident changed their car deadline to 11 PM", not "I need my car by 11 PM". In the trial, the first-person version made Home C claim Home A's deadline as its own.
 
-### 13.4 Prompt guidance (C)
+### 13.4 Prompt guidance
 
 Each household system prompt says that:
 - The resident's approved deadlines are binding, and only soft preferences can be traded.
@@ -466,7 +465,7 @@ Show three schedules: **preferred times**, the **cheap timer** (each home picks 
 
 Home B's office lights are a separate 0.1 kW load from 6:00 to 10:00 PM. With permission to turn them off from 6:00 to 9:00 PM, exactly 0.3 kWh is removed. Keep it out of the core numbers unless both the baseline and the plan include it.
 
-## 16. Phone app (A)
+## 16. Phone app
 
 - Designed for about 390 px wide, with large tap targets and no sideways scrolling.
 - **Setup:** choose household, enter code. Store identity and token locally. `/phone?home=A` pins a browser tab to a home, because tabs share local storage. It's needed for testing three homes on one laptop.
@@ -480,13 +479,13 @@ Home B's office lights are a separate 0.1 kW load from 6:00 to 10:00 PM. With pe
 
 Suggested requests:
 - A: "I leave at 11 pm tonight. Have my car ready by then." (Feasible. The car then runs 8–11 PM, which squeezes Home B. That's a good second negotiation.)
-- B: "My dryer must finish by 10 pm. You can move the dishwasher."
-- C: "The car can charge anytime before 7 am."
-- Impossible: A asks for "car ready by 8 pm". A 3-hour charge can't finish by 8 PM when planning starts at 6 PM. It must be rejected with an explanation.
+- Home B: "My dryer must finish by 10 pm. You can move the dishwasher."
+- Home C: "The car can charge anytime before 7 am."
+- Impossible: Home A asks for "car ready by 8 pm". A 3-hour charge can't finish by 8 PM when planning starts at 6 PM. It must be rejected with an explanation.
 
 Presets go through the same backend path. Never animate a change that skipped the backend.
 
-## 17. Dashboard (B)
+## 17. Dashboard
 
 Built for a 1440×900 projector with no scrolling during the main story.
 
@@ -509,7 +508,7 @@ Vite runs on 5173 and FastAPI on 8000, with Vite proxying `/api` to `http://127.
 
 ### 18.2 Demo: one origin
 
-1. B builds with `npm run build` inside `frontend/`.
+1. Build with `npm run build` inside `frontend/`.
 2. FastAPI serves `frontend/dist` with API routes first, then a fallback for `/phone` and `/dashboard`. `index.html`, `sw.js`, and the manifest use `no-cache`. Every `/api` response uses `no-store`.
 3. Start the backend from the repo root on 127.0.0.1:8000.
 4. Open `http://127.0.0.1:8000/dashboard` on the laptop.
@@ -541,37 +540,37 @@ A real native wrapper needs full Xcode. With a free Apple ID the app expires aft
 - Stage only owned paths and check the staged diff.
 - **Before pushing frontend work, run `npm run build`**, which includes the typecheck. In the trial, a commit with a failed typecheck reached a PR.
 - **Before pushing backend work, run the tests.**
-- B merges PRs with a **regular merge commit**, not a squash, so teammates can keep using their branches after `git fetch origin && git merge origin/main`.
+- PRs are merged with a **regular merge commit**, not a squash, so teammates can keep using their branches after `git fetch origin && git merge origin/main`.
 - Merge one PR at a time after a quick check. No force pushes and no rewriting shared history.
-- Only B changes frontend dependencies, and only D changes Python dependencies.
+- Frontend dependencies change only in the dashboard and integration area, and Python dependencies only in the backend and engine area.
 
 ## 21. Schedule
 
-See `team-schedule.md` for kickoff, decisions, checkpoints, and cuts, and the role guides for each person's steps.
+The build ran in six hours with checkpoints for kickoff, integration, and cuts.
 
 ## 22. Acceptance checks
 
-| Check | Passing result | Owner |
+| Check | Passing result | Area |
 |---|---|---|
-| EV energy and cost | 21.6 kWh. $7.13 at $0.33, $12.74 at $0.59. | D |
-| Total energy | 136.95 kWh for every schedule | D |
-| Flat-rate control | Every schedule costs $24.65 under flat pricing | D |
-| Preferred-times overload | 23.0 kW peak, over the limit, labeled honestly | D, B |
-| Cheap-timer pile-up | 26.6 kW peak is visible, and coordination lowers it | D, B |
-| Engine first plan | Safe, with B's dryer in expensive hours | D |
-| Negotiation improvement | B objects, A agrees, Plan 2 is cheaper for B and the same for A | C, D |
-| Real peer reply | One agent receives another's real message and answers with `reply_to_event_id` | C |
-| Live delivery | The first agent message appears on the dashboard before the job ends | C, D, B |
-| Plain English | A non-teammate reads one full round and can say what changed | C, B |
-| Tariff toggle | Flat, then Coordinate, gives a plan priced flat with no cost objections | D, C, B |
-| Privacy | Phone A never receives B's or C's appliances, costs, or private messages | D, A |
-| Wrong code | Phone shows FORBIDDEN plus Change household | A |
-| Impossible deadline | "Car ready by 8 pm" is rejected and explained | D, C, A |
-| Bad model output | Unknown task, changed duration, missing task, or another home's task is rejected | C, D |
-| Stale or reset race | An old AI result can't overwrite a newer revision or a reset | D |
-| Duplicate tap | The same request ID produces one job | D, A |
+| EV energy and cost | 21.6 kWh. $7.13 at $0.33, $12.74 at $0.59. | Backend |
+| Total energy | 136.95 kWh for every schedule | Backend |
+| Flat-rate control | Every schedule costs $24.65 under flat pricing | Backend |
+| Preferred-times overload | 23.0 kW peak, over the limit, labeled honestly | Backend, Dashboard |
+| Cheap-timer pile-up | 26.6 kW peak is visible, and coordination lowers it | Backend, Dashboard |
+| Engine first plan | Safe, with Home B's dryer in expensive hours | Backend |
+| Negotiation improvement | Home B objects, Home A agrees, Plan 2 is cheaper for Home B and the same for Home A | Agents, Backend |
+| Real peer reply | One agent receives another's real message and answers with `reply_to_event_id` | Agents |
+| Live delivery | The first agent message appears on the dashboard before the job ends | Agents, Backend, Dashboard |
+| Plain English | Someone outside the team reads one full round and can say what changed | Agents, Dashboard |
+| Tariff toggle | Flat, then Coordinate, gives a plan priced flat with no cost objections | Backend, Agents, Dashboard |
+| Privacy | Phone A never receives Home B's or Home C's appliances, costs, or private messages | Backend, Phone |
+| Wrong code | Phone shows FORBIDDEN plus Change household | Phone |
+| Impossible deadline | "Car ready by 8 pm" is rejected and explained | Backend, Agents, Phone |
+| Bad model output | Unknown task, changed duration, missing task, or another home's task is rejected | Agents, Backend |
+| Stale or reset race | An old AI result can't overwrite a newer revision or a reset | Backend |
+| Duplicate tap | The same request ID produces one job | Backend, Phone |
 | Three phones | Three installed icons, three homes, one shared revision | All |
-| AI failure | Old plan kept, labeled fallback, clear message | C, A, B |
+| AI failure | Old plan kept, labeled fallback, clear message | Agents, Phone, Dashboard |
 | Secrets | `.env` ignored, no key in the staged diff or the built bundle | All |
 
 Backend checks: `python -m pytest backend -q` from the repo root. Frontend check: `npm run build` inside `frontend/`.
@@ -583,7 +582,7 @@ Backend checks: `python -m pytest backend -q` from the repo root. Frontend check
 | 0:00–0:35 | Dashboard: the evening overload, 23 kW against a 15 kW limit | Three homes, two EVs, and a dryer, all at 6 PM. That's realistic, and it overloads the street. |
 | 0:35–1:05 | Three phones with the PowerSync icon | Each household has its own AI representative and sees only its own plan. |
 | 1:05–2:30 | Coordinate. Plan 1 appears, Home B objects, Home A agrees, Plan 2 commits. | The scheduler's first plan was safe but put B's dryer in peak prices. The neighbors found a better plan. |
-| 2:30–3:30 | A changes their deadline from the phone and confirms | A personal change replans the street, and nobody's deadline breaks. |
+| 2:30–3:30 | Home A changes their deadline from the phone and confirms | A personal change replans the street, and nobody's deadline breaks. |
 | 3:30–4:15 | Metrics, cheap-timer line, flat-rate toggle | A cheap timer alone makes the peak worse. Under a flat rate, moving things saves nothing, and the numbers show that. |
 | 4:15–5:00 | Validation badge, architecture, close | Simulated appliances, real phones, real agents, real checks. Real use would need device and utility integration and household consent. |
 
@@ -608,7 +607,7 @@ Prepared answers:
 | What happened | What to do this time |
 |---|---|
 | Free model: Home B timed out at 40 s and 100 s, and the quota ran out | Time a real call by 0:30, choose a fast model, keep limits in environment settings, use a stub in tests |
-| "Works for A, not me" because tokens differed | Blank tokens for everyone in development, an auth badge on screen, enforce only on the demo laptop |
+| "Works on one laptop, not another" because tokens differed | Blank tokens for everyone in development, an auth badge on screen, enforce only on the demo laptop |
 | "Waiting for backend" and Vite 500s | The backend wasn't running. Show "Backend not running on port 8000." |
 | `npm` ENOENT | `npm` was run from the repo root. The README says to run it in `frontend/`. |
 | Three tabs showed the same home | Tabs share storage. Use `/phone?home=A`. |
@@ -622,7 +621,7 @@ Prepared answers:
 | Model ID typo | Copy from the catalog, and show the model in health |
 | Typecheck failure pushed | `npm run build` before every frontend push |
 | Agent tests passed on an old scenario | One scenario file for everything |
-| Auto-merge blocked | B merges by hand with a regular merge commit |
+| Auto-merge blocked | Merge by hand with a regular merge commit |
 
 ## 26. References
 

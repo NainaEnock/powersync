@@ -1,6 +1,6 @@
 """Code-written (system_template) text. Plain English, 12-hour times, dollars from code.
 
-C owns conversation wording; these are the backend's templates for plan/validation/commit
+The agents own conversation wording; these are the backend's templates for plan/validation/commit
 messages and the stub. C may import and reuse them, or tell D what to change.
 """
 
@@ -14,7 +14,7 @@ from .timefmt import slot_to_time, span_text, usd
 
 
 def noun(t: Task) -> str:
-    """'EV charging' -> 'car charging' (C's wording), 'Clothes dryer' -> 'clothes dryer'."""
+    """'EV charging' -> 'car charging' (the agents' wording), 'Clothes dryer' -> 'clothes dryer'."""
     if t.name.lower().startswith("ev "):
         return "car " + t.name[3:]
     return t.name if t.name[:2].isupper() else t.name[0].lower() + t.name[1:]

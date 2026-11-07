@@ -1,4 +1,4 @@
-"""Shared fixtures for the agent tests: D's real engine and scenario.json, stub models only."""
+"""Shared fixtures for the agent tests: the real engine and scenario.json, stub models only."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 import pytest
 
 os.environ.pop("OPENROUTER_API_KEY", None)  # tests never call the real model
-os.environ.pop("POWERSYNC_ENGINE_MODULE", None)  # D's backend.simulation.engine_api
+os.environ.pop("POWERSYNC_ENGINE_MODULE", None)  # backend.simulation.engine_api
 
 from backend.simulation.engine_api import scenario_snapshot  # noqa: E402
 

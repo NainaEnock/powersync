@@ -2,7 +2,7 @@
 
 The model only picks task, field, and a clock time. Code maps the time to a
 slot, checks the edit belongs to this home, checks feasibility through MCP,
-and writes the confirmation text. Nothing is applied here: D stores the
+and writes the confirmation text. Nothing is applied here: the backend stores the
 result as a PendingChange and applies it only after the resident confirms.
 """
 
@@ -18,8 +18,9 @@ from .config import AgentSettings, load_settings
 from .events import EmitFn, Emitter, JobStale
 from .mcp_client import EnergyTools, ToolUnavailable, get_energy_tools
 from .openrouter import Budget, BudgetExceeded, ModelClient, ModelUnavailable, default_model, structured_turn, with_timeout
+from .plainwords import read_request, without_questions
 from .prompts import INTERPRETER_SYSTEM, interpret_user
-from .schemas import InterpretOutput
+from .schemas import InterpretEdit, InterpretOutput
 from .stub_model import RuleStubModel
 from .timefmt import clock_to_slot, duration_text, slot_to_clock, slot_to_time
 from .toolcalls import Planner
@@ -49,7 +50,7 @@ async def interpret_request(
     infeasible_reasons, source, usage}. outcome is one of proposed_change,
     infeasible, needs_clarification, no_change, error.
 
-    Emits only the activity stage and MCP tool events: D writes the reply to
+    Emits only the activity stage and MCP tool events: the backend writes the reply to
     the resident from this result (contract §5)."""
     try:
         return await _interpret(snapshot, home_id, text, emit, job_id=job_id, model=model, tools=tools, settings=settings)
@@ -105,10 +106,31 @@ async def _interpret(snapshot, home_id, text, emit, *, job_id, model, tools, set
         await em.stage(None)
         return _result("error", f"AI_UNAVAILABLE: {exc}", model, budget)
 
+    read_by = "model"
     if not out.understood or not out.edits:
-        q = clean_model_text(out.question or "", snapshot, set()) or "Could you say which appliance and what time you mean?"
-        await em.stage(None)
-        return _result("needs_clarification", q, model, budget)
+        # The model wasn't sure. If plain code can read a clear appliance and time out of the
+        # message ("washing machine finished by 8.30 pm"), propose that: the resident still sees
+        # the exact change and must confirm it. Otherwise ask one specific question.
+        reading = read_request(without_questions(text), own)
+        if reading.complete:
+            out = InterpretOutput(understood=True, edits=[
+                InterpretEdit(task_id=reading.task_id, field=reading.field, new_time=reading.hhmm)])
+            read_by = "rules"
+        else:
+            q, choices = _question(reading, own)
+            model_q = clean_model_text(out.question or "", snapshot, set())
+            if not q and model_q:
+                q = model_q
+                choices = [c for c in (clean_model_text(x, snapshot, set()) for x in out.choices) if c][:4]
+                choices = [c if len(c) <= 60 else c[:59].rstrip() + "…" for c in choices]
+            if not q:
+                q = ("Which appliance do you mean, and what time should it be done by? "
+                     'For example: "Have the dishwasher done by 10 pm."')
+                choices = [label(t).capitalize() for t in own][:4]
+            await em.stage(None)
+            res = _result("needs_clarification", q, model, budget)
+            res["choices"] = choices
+            return res
 
     tasks = tasks_by_id(snapshot)
     edits = []
@@ -153,14 +175,41 @@ async def _interpret(snapshot, home_id, text, emit, *, job_id, model, tools, set
         msg = f"I can't change {change_words}. " + " ".join(reasons)
         await em.stage(None)
         res = _result("infeasible", clip(msg), model, budget)
-        res.update(proposed_edits={"edits": edits}, feasible=False, infeasible_reasons=reasons, explanation=clip(msg))
+        res.update(proposed_edits={"edits": edits}, feasible=False, infeasible_reasons=reasons, explanation=clip(msg),
+                   read_by=read_by)
         return res
 
     msg = f"Change {change_words}?"  # D appends "Confirm on your phone to replan with the neighbors."
     await em.stage(None)
     res = _result("proposed_change", clip(msg), model, budget)
-    res.update(proposed_edits={"edits": edits}, feasible=True, infeasible_reasons=[], explanation=clip(msg))
+    res.update(proposed_edits={"edits": edits}, feasible=True, infeasible_reasons=[], explanation=clip(msg),
+               read_by=read_by)
     return res
+
+
+def _question(reading, own: list[dict[str, Any]]) -> tuple[str | None, list[str]]:
+    """A specific follow-up, with tap-to-answer choices, when code understood half of the message."""
+    by_id = {t["id"]: t for t in own}
+    if reading.choices:
+        names = [label(by_id[i]) for i in reading.choices if i in by_id]
+        when = f" by {slot_to_time(clock_to_slot(reading.hhmm, kind='deadline'))}" if reading.hhmm else ""
+        return f"Did you mean your {' or your '.join(names)}{when}?", [n.capitalize() for n in names]
+    if reading.task_id and not reading.hhmm:
+        t = by_id[reading.task_id]
+        times = [s for s in (16, 20, 24, 28, 48) if s != t["deadline_slot"]][:4]  # 10 PM, 11 PM, midnight, 1 AM, 6 AM
+        return (f"What time should your {label(t)} be done by? Right now it's {slot_to_time(t['deadline_slot'])}.",
+                [slot_to_time(s) for s in times])
+    if reading.hhmm and not reading.task_id:
+        names = [label(t) for t in own]
+        when = slot_to_time(clock_to_slot(reading.hhmm, kind="deadline"))
+        return f"Which appliance should be done by {when}: your {and_or(names)}?", [n.capitalize() for n in names][:4]
+    return None, []
+
+
+def and_or(items: list[str]) -> str:
+    if len(items) <= 2:
+        return " or ".join(items)
+    return ", ".join(items[:-1]) + f", or {items[-1]}"
 
 
 def apply_edits(snapshot: dict[str, Any], edits: list[dict[str, Any]]) -> dict[str, Any]:
