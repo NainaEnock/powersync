@@ -137,6 +137,10 @@ def test_negotiation_finds_plan_2(snapshot):
     assert m2["A"]["variable_cost_usd"] == pytest.approx(m1["A"]["variable_cost_usd"], abs=0.005)
     assert res["metrics"]["capacity_violations"] == 0
     assert res["usage"]["model_calls"] <= 12 and res["usage"]["tool_calls"] <= 24
+    # Dashboard home cards key off "Home X" in the activity line.
+    for h in "ABC":
+        assert f"Home {h} is reviewing Plan 1" in rec.stages
+    assert "Home A is answering Home B" in rec.stages
 
 
 def test_flat_tariff_no_cost_objections(flat_snapshot):

@@ -351,6 +351,7 @@ class _Negotiation:
 
     async def _review(self, home: str, plan: Plan, rnd: int) -> Review:
         name = home_name(self.snap, home)
+        await self.em.stage(f"{name} is reviewing {plan.name}")  # B's home cards key off "Home X"
         try:
             opts = await self._options(home, plan, rnd)
         except (ToolUnavailable, BudgetExceeded) as exc:
