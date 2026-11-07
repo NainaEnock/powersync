@@ -386,3 +386,22 @@ def test_plan_numbers_continue_after_a_multi_plan_job(monkeypatch):
         wait_job(c, c.post("/api/coordinate", json={}).json()["job_id"])
         assert seen == [1, 3]
         assert c.get("/api/state").json()["coordination"]["plan_name"] == "Plan 4"
+
+
+def test_engine_verdict_decides_the_wording(monkeypatch):
+    """If the interpreter says "I can't" but the engine finds the change feasible, the resident must
+    see a normal confirm question, not "I can't ..." next to a Confirm button."""
+    async def says_impossible(ctx, emit):
+        return InterpretResult(
+            outcome="edits", edits=[{"task_id": "a_ev", "field": "deadline_slot", "new_value": 20}],
+            explanation="I can't change the finish time for your car charging from 1:00 AM to 11:00 PM.",
+            claimed_feasible=False, source="live",
+        )
+
+    with make_client(monkeypatch, interpret=says_impossible) as c:
+        j = wait_job(c, c.post("/api/message", json={"home_id": "A", "text": "car by 11", "request_id": "w-1"}).json()["job_id"])
+        assert j["status"] == "awaiting_confirmation"
+        pc = [p for p in c.get("/api/state?home=A").json()["pending_changes"] if p["status"] == "pending"][0]
+        assert pc["feasible"] is True
+        assert pc["explanation"].startswith("Change ")
+        assert "can't" not in j["result"]["message"]

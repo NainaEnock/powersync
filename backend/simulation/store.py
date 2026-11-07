@@ -309,7 +309,10 @@ class Store:
 
         def edit_phrase(x: ProposedEdit) -> str:
             return f"your {noun(tasks[x.task_id])}'s {FIELD_WORDS[x.field]} from {x.old_time} to {x.new_time}"
-        explanation = result.explanation.strip() or (
+        # The engine's verdict decides the wording. The interpreter's text is used only when it agrees,
+        # so a resident never sees "I can't ..." next to a Confirm button (or "Change ...?" on a no).
+        agrees = result.claimed_feasible is None or result.claimed_feasible == feasible
+        explanation = (result.explanation.strip() if agrees else "") or (
             "Change " + " and ".join(edit_phrase(x) for x in edits) + "?" if feasible
             else "That change can't work. " + " ".join(reasons))
         for p in self.pending.values():  # one open change per home: a new one supersedes the old

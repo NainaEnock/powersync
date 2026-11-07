@@ -55,6 +55,9 @@ class InterpretResult(BaseModel):
     source: Literal["live", "stub"] = "live"
     # Who wrote the text shown to the resident: only a model-written clarifying question is "model".
     message_source: Literal["model", "system_template"] = "system_template"
+    # The interpreter's own verdict on its edits (True: "Change ...?", False: "I can't ..."), if it gave one.
+    # D's engine decides; the interpreter's explanation is shown only when the two agree.
+    claimed_feasible: Optional[bool] = None
 
 
 class CoordinateContext(BaseModel):
@@ -199,6 +202,7 @@ def adapt_interpret(fn: Callable[..., Any]) -> InterpretFn:
                   "needs_clarification": "needs_clarification", "no_change": "no_change"}.get(outcome)
         if mapped is None:
             raise ValueError(f"unknown interpreter outcome {outcome!r}")
+        claimed = {"proposed_change": True, "infeasible": False}.get(outcome)
         if mapped == "infeasible" and edits:
             mapped = "edits"  # D's engine decides feasibility; the change card shows the reason
         source = "stub" if out.get("source") in ("stub", "system_template") else "live"
@@ -210,7 +214,7 @@ def adapt_interpret(fn: Callable[..., Any]) -> InterpretFn:
             outcome=mapped, edits=edits, explanation=str(out.get("explanation") or ""),
             message=str(out.get("message") or out.get("question") or ""),
             infeasible_reasons=[str(r) for r in out.get("infeasible_reasons") or []],
-            source=source, message_source=msg_src,
+            source=source, message_source=msg_src, claimed_feasible=claimed,
         )
     return interpret
 
