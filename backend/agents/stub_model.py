@@ -89,11 +89,20 @@ def _rule_interpret(meta: dict[str, Any]) -> dict[str, Any]:
         return {"understood": False, "edits": [], "question": "What time do you need it done by?"}
     h = int(m.group(1)) % 12 + (12 if m.group(3).startswith("p") else 0)
     hhmm = f"{h:02d}:{int(m.group(2) or 0):02d}"
-    words = {"car": ("ev", "car", "charg"), "dryer": ("dryer",), "dishwasher": ("dish",)}
+    words = {
+        "car": ("ev", "car", "charg"), "dryer": ("dryer",), "dishwasher": ("dish",),
+        "washing machine": ("washing machine", "washer"),
+        "water heater": ("water heater", "hot water", "heater"),
+        "air conditioning": ("air conditioning", "air con", "a/c", " ac ", "cooling"),
+        "pool pump": ("pool", "pump"),
+    }
+    padded = f" {text} "
     for task in meta["tasks"]:
         label = task["label"]
         keys = next((v for k, v in words.items() if k in label), (label,))
-        if any(k in text for k in keys):
+        # "dishwasher" contains "washer": only the dishwasher may claim it.
+        hay = padded if "dish" in label else padded.replace("dishwasher", "")
+        if any(k in hay for k in keys):
             return {
                 "understood": True,
                 "edits": [{"task_id": task["id"], "field": "deadline_slot", "new_time": hhmm}],

@@ -255,11 +255,18 @@ def trigger_text(snap: dict[str, Any], trigger: dict[str, Any] | None) -> tuple[
     return clip(full), views, third
 
 
+def and_join(items: list[str]) -> str:
+    """'dryer' / 'dryer and dishwasher' / 'dryer, dishwasher, and pool pump'."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return ", ".join(items[:-1]) + ", and " + items[-1]
+
+
 def review_view(snap, home_id: str, plan_name: str, accept: bool, own_pricey: list[str], asked: bool) -> str:
     if accept:
         return f"Your agent reviewed {plan_name}: it meets your deadlines, so it agreed."
     if asked:
-        what = ", ".join(own_pricey) or "some of your use"
+        what = and_join(own_pricey) or "some of your use"
         return (
             f"Your agent reviewed {plan_name}: it meets your deadlines but runs your {what} in expensive hours, "
             f"so it asked a neighbor to adjust."
