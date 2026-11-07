@@ -242,6 +242,38 @@ def test_third_person_trigger(snapshot):
     assert res["outcome"] == "plan_ready" and res["metrics"]["missed_deadlines"] == 0
 
 
+def test_replan_continues_numbering_and_compares_with_current_plan(snapshot):
+    first, _ = run(_coordinate(snapshot, RuleStubModel()))
+    snapshot["next_plan_number"] = 3
+    snapshot["previous_schedule"] = first["schedule"]
+    for t in snapshot["tasks"]:
+        if t["id"] == "a_ev":
+            t["deadline_slot"] = 20  # "car ready by 11 pm"
+    res, rec = run(_coordinate(snapshot, RuleStubModel(), trigger={
+        "home_id": "A", "task_id": "a_ev", "field": "deadline_slot", "old_value": 28, "new_value": 20,
+        "text": "Home A's resident changed their EV charging's finish time to 11:00 PM."}))
+    proposals = rec.of("proposal")
+    assert proposals[0]["proposal_id"] == "P-3"
+    assert proposals[0]["text"].startswith("Here's Plan 3. What's different from the current plan:")
+    assert "Plan 1" not in " ".join(e["text"] for e in rec.events)
+    assert res["plan_name"].startswith("Plan ") and int(res["plan_name"].split()[1]) >= 3
+
+
+def test_planner_down_says_safe_plan(snapshot):
+    class DeadTools(EnergyTools):
+        async def call(self, name, arguments):
+            from backend.agents.mcp_client import ToolUnavailable
+            raise ToolUnavailable("down")
+
+    async def go():
+        rec = Recorder()
+        res = await coordinate_neighborhood(snapshot, rec, job_id="j", model=RuleStubModel(), tools=DeadTools())
+        return res, rec
+
+    res, rec = run(go())
+    assert res["outcome"] == "error" and "Using the safe plan" in rec.of("error")[0]["text"]
+
+
 def test_stale_job_stops_quietly(snapshot):
     class StaleAfter(Recorder):
         def __call__(self, e):
