@@ -12,10 +12,11 @@ await get_energy_tools().close()          # at shutdown
 
 res = await interpret_request(snapshot, "A", text, emit, job_id=job.id)
 res = await coordinate_neighborhood(snapshot, emit, job_id=job.id, trigger=None)
-# ... D validates res["schedule"] against canonical tasks, checks generation and
-# requirements_version, commits, bumps revision, THEN:
-await announce_commit(snapshot, res, emit, job_id=job.id)
+# D validates res["schedule"], emits the validation and commit messages, and commits.
+# C sends no commit message and no reply to the resident (contract §5 and §6).
 ```
+
+**Superseded by docs/contract.md v2 where they differ.** Trigger is D's shape (`text` already third person). `emit` returning `""` means the job went stale, and C stops quietly.
 
 Pass no `model` in production: the live OpenRouter client is used if `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` are set.
 - `interpret_request` with no key falls back to `RuleStubModel` (labeled `source: "stub"`). Report `agent_impl.interpret` from `res["source"]`.
@@ -77,7 +78,7 @@ Until that module exists, tests use `backend/agents/tests/fake_engine.py` throug
 |---|---|
 | `OPENROUTER_TIMEOUT_SECONDS` | 20 (per model call) |
 | `OPENROUTER_JOB_SECONDS` | 45 (whole job) |
-| `POWERSYNC_AGENT_TIMEOUT_S` | 25 (one agent turn) |
+| `POWERSYNC_TURN_TIMEOUT_S` | 20 (one agent turn; D's `POWERSYNC_AGENT_TIMEOUT_S` is the outer job guard) |
 | `POWERSYNC_MAX_ROUNDS` | 3 |
 | `POWERSYNC_MAX_MODEL_CALLS` | 12 |
 | `POWERSYNC_MAX_TOOL_CALLS` | 24 |
