@@ -1,4 +1,4 @@
-// Mirrors docs/contract.md v1 (D owns; wins over the PRD) and PRD §10.
+// Mirrors docs/contract.md (wins over the PRD) and PRD §10.
 // Money arrives with 4 decimals: always format to 2 in the UI.
 
 export type HomeId = 'A' | 'B' | 'C'

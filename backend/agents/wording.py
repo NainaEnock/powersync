@@ -230,7 +230,7 @@ def is_change(trigger: dict[str, Any] | None) -> bool:
 def trigger_text(snap: dict[str, Any], trigger: dict[str, Any] | None) -> tuple[str, dict[str, str], str]:
     """(dashboard text, home_views, third-person context for agents).
 
-    D's trigger: {home_id, task_id, field, old_value, new_value, old_time,
+    The backend's trigger: {home_id, task_id, field, old_value, new_value, old_time,
     new_time, edits, text}, where text is already third person.
     """
     homes = home_ids(snap)

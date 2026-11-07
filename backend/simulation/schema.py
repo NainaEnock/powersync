@@ -64,7 +64,7 @@ class Home(BaseModel):
 
 
 class Snapshot(BaseModel):
-    """Everything the engine needs, built by the backend. JSON-serializable so C can pass it over MCP.
+    """Everything the engine needs, built by the backend. JSON-serializable so the agents can pass it over MCP.
 
     Model arguments never replace these fields: the backend builds every snapshot.
     """

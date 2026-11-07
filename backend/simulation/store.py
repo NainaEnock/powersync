@@ -531,7 +531,7 @@ class Store:
                     announced = True
                 except asyncio.CancelledError:
                     raise
-                except Exception as e:  # noqa: BLE001  fall back to D's template
+                except Exception as e:  # noqa: BLE001  fall back to the backend's template
                     print(f"[powersync] announce_commit failed: {type(e).__name__}: {e}", file=sys.stderr)
             if not announced:
                 c_text, c_views = commit_text(snap, plan_name, schedule, previous, baseline_after)

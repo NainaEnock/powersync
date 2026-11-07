@@ -1,4 +1,4 @@
-"""C's tests: real MCP stdio calls, stub/scripted models only (never the real key)."""
+"""Agent tests: real MCP stdio calls, stub/scripted models only (never the real key)."""
 
 from __future__ import annotations
 
@@ -226,7 +226,7 @@ def test_model_dollar_amounts_replaced(snapshot):
 
 
 def test_third_person_trigger(snapshot):
-    """D's trigger shape: third-person text already written, no 'kind' key."""
+    """The backend's trigger shape: third-person text already written, no 'kind' key."""
     trigger = {"home_id": "A", "task_id": "a_ev", "field": "deadline_slot", "old_value": 28, "new_value": 20,
                "old_time": "1:00 AM", "new_time": "11:00 PM", "edits": [],
                "text": "Home A's resident changed their EV charging's finish time to 11:00 PM."}
@@ -307,7 +307,7 @@ def test_interpret_deadline_change(snapshot):
     assert edit == {"task_id": "a_ev", "field": "deadline_slot", "old_value": 28, "new_value": 20,
                     "old_time": "1:00 AM", "new_time": "11:00 PM"}
     assert "11:00 PM" in res["explanation"]
-    # D writes the reply to the resident; C only emits tool traffic here.
+    # The backend writes the reply to the resident; the interpreter only emits tool traffic here.
     assert all(e["type"].startswith("tool_") for e in rec.events)
 
 

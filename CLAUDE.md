@@ -1,21 +1,21 @@
 # PowerSync: standing instructions for coding assistants
 
-Save this file as `CLAUDE.md` (Claude Code) or `AGENTS.md` (other assistants) at the repo root. Full spec: `docs/PRD.md`. Schedule: `docs/team-schedule.md`. Confirmed fields: `docs/contract.md`, which wins over the PRD when they differ.
+Save this file as `CLAUDE.md` (Claude Code) or `AGENTS.md` (other assistants) at the repo root. Full spec: `docs/PRD.md`. Confirmed fields: `docs/contract.md`, which wins over the PRD when they differ.
 
 ## The project
 
 PowerSync is a six-hour hackathon prototype for the NOVA event. Three homes each have an AI agent that negotiates when simulated appliances run, so the street stays under a 15 kW limit and usage moves into cheaper hours without breaking any resident's deadline. There are three phone web apps (one per home), one projected dashboard, and one FastAPI backend on a laptop. The appliances and homes are simulated. The phones and agents are real.
 
-Four people work in parallel, and each person's assistant works only in that person's area:
+The code is split into four areas, and an assistant works in one area at a time:
 
-| Role | Owns |
+| Area | Files |
 |---|---|
-| A: phone | `frontend/src/phone/` |
-| B: dashboard and integration | `frontend/` config, routing, `api.ts`, `types.ts`, `fixtures.ts`, `frontend/src/dashboard/`, PWA, merges |
-| C: agents and MCP | `backend/agents/`, `backend/tools/` |
-| D: backend and engine | `backend/main.py`, `backend/simulation/`, `backend/data/`, `backend/requirements.txt`, `docs/contract.md` |
+| Phone | `frontend/src/phone/` |
+| Dashboard and integration | `frontend/` config, routing, `api.ts`, `types.ts`, `fixtures.ts`, `frontend/src/dashboard/`, PWA, merges |
+| Agents and MCP | `backend/agents/`, `backend/tools/` |
+| Backend and engine | `backend/main.py`, `backend/simulation/`, `backend/data/`, `backend/requirements.txt`, `docs/contract.md` |
 
-Ask which role you're working for if it isn't stated. Don't edit files outside that role. When another owner needs to change something, give the exact path and change for them.
+Ask which area you're working in if it isn't stated. Don't edit files outside that area. When another area needs to change something, give the exact path and change for them.
 
 ## Hard rules
 
@@ -24,8 +24,8 @@ Ask which role you're working for if it isn't stated. Don't edit files outside t
 3. Never put secrets or tokens in frontend code, `VITE_` variables, URLs, or query strings. Tokens go in `Authorization: Bearer` headers only.
 4. Never fake agent traffic or results. Label sample data as sample data. Show failures as failures.
 5. Don't claim a test or build passed unless you ran it and saw it pass.
-6. Don't rename shared fields or change the contract without saying so first. Propose `field → change → affected owners → test to rerun`.
-7. Don't add frameworks, databases, or dependencies outside the PRD stack. B owns frontend packages and D owns Python packages.
+6. Don't rename shared fields or change the contract without saying so first. Propose `field → change → affected areas → test to rerun`.
+7. Don't add frameworks, databases, or dependencies outside the PRD stack. Frontend packages belong to the dashboard and integration area; Python packages belong to the backend and engine area.
 
 ## Stack and how to run it
 
@@ -43,7 +43,7 @@ Ask which role you're working for if it isn't stated. Don't edit files outside t
 - Always-on use is 1.2 kW per home. The shared limit is 15 kW.
 - Time-of-use prices: $0.59/kWh 4–9 PM, $0.33 otherwise. Flat: $0.18.
 - Total energy is always 136.95 kWh. Moving a task never changes kWh, and under flat pricing it never changes cost.
-- The built-in conflict: the engine's first plan is safe but puts B's dryer in expensive hours. A starting at 9:45 PM fixes it at no cost to A. Agents must find this through a real exchange. **Never hard-code it.**
+- The built-in conflict: the engine's first plan is safe but puts Home B's dryer in expensive hours. Home A starting at 9:45 PM fixes it at no cost to Home A. Agents must find this through a real exchange. **Never hard-code it.**
 
 ## Conventions
 
@@ -56,7 +56,7 @@ Ask which role you're working for if it isn't stated. Don't edit files outside t
 - Stdio MCP server logs go to stderr, never stdout.
 - Every limit (timeouts, rounds, budgets) is an environment setting.
 - Automated tests never call the real model. Use a stub.
-- Show `auth_mode`, data mode, and backend connection on screen. A blank token means that role is open.
+- Show `auth_mode`, data mode, and backend connection on screen. A blank token means that access level is open.
 
 ## Known pitfalls from the practice run
 
@@ -71,4 +71,4 @@ Ask which role you're working for if it isn't stated. Don't edit files outside t
 
 ## How to report after each slice
 
-Say which files changed, the command or click to try it, what you actually ran and saw, which mode it ran in (sample data, live with stub agent, or fully live), and what the next teammate needs. Keep it short.
+Say which files changed, the command or click to try it, what you actually ran and saw, which mode it ran in (sample data, live with stub agent, or fully live), and what the next person needs. Keep it short.

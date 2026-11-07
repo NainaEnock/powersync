@@ -1,4 +1,4 @@
-"""PowerSync agents (owner: C). The backend (D) uses these entry points:
+"""PowerSync agents. The backend uses these entry points:
 
     from backend.agents import interpret_request, coordinate_neighborhood
 

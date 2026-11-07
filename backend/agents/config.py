@@ -1,7 +1,7 @@
 """Agent limits and model settings, all read from the environment.
 
 Read at call time (not import time) so tests and a restarted job pick up
-changes. D's main.py loads `.env`; nothing here reads or prints secret values
+changes. The backend's main.py loads `.env`; nothing here reads or prints secret values
 beyond passing the key to the HTTP client.
 """
 

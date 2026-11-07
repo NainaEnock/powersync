@@ -3,7 +3,7 @@
 //   <PhoneApp homeId={homeId} api={api} />            phone polls its own state
 //   <PhoneApp homeId={homeId} api={api} state={polled} />  or B passes usePoll() output
 //
-// homeId comes from /phone?home=X (B's App.tsx). If null, the phone uses the
+// homeId comes from /phone?home=X (App.tsx). If null, the phone uses the
 // household last chosen on this device, or shows the picker.
 // State is GET /api/state?home=X, already filtered by the server (PRD §11.3).
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
@@ -86,7 +86,7 @@ function rememberHome(home: HomeId | null) {
 export interface PhoneAppProps {
   homeId: HomeId | null;
   api: Api;
-  /** Optional: B's usePoll(api.state(homeId)) result. If omitted the phone polls itself. */
+  /** Optional: a usePoll(api.state(homeId)) result. If omitted the phone polls itself. */
   state?: Polled<NeighborhoodState>;
 }
 
@@ -484,7 +484,7 @@ function ChangeCards({
           <section key={c.id} className="ps-card ps-confirm" aria-live="polite">
             <h2>Confirm a change</h2>
             <p className="ps-question">{changeQuestion(c, state.tasks)}</p>
-            {/* D's default explanation is the same question in other words; only show extra context. */}
+            {/* The backend's default explanation is the same question in other words; only show extra context. */}
             {c.explanation && !c.explanation.trim().startsWith('Change ') && (
               <p className="ps-muted">{c.explanation}</p>
             )}

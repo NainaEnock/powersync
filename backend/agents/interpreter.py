@@ -2,7 +2,7 @@
 
 The model only picks task, field, and a clock time. Code maps the time to a
 slot, checks the edit belongs to this home, checks feasibility through MCP,
-and writes the confirmation text. Nothing is applied here: D stores the
+and writes the confirmation text. Nothing is applied here: the backend stores the
 result as a PendingChange and applies it only after the resident confirms.
 """
 
@@ -50,7 +50,7 @@ async def interpret_request(
     infeasible_reasons, source, usage}. outcome is one of proposed_change,
     infeasible, needs_clarification, no_change, error.
 
-    Emits only the activity stage and MCP tool events: D writes the reply to
+    Emits only the activity stage and MCP tool events: the backend writes the reply to
     the resident from this result (contract §5)."""
     try:
         return await _interpret(snapshot, home_id, text, emit, job_id=job_id, model=model, tools=tools, settings=settings)

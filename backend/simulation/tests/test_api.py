@@ -162,7 +162,7 @@ def test_auth_enforced(monkeypatch):
         assert r.status_code == 403 and r.json()["error"]["code"] == "FORBIDDEN"
         assert c.get("/api/state?home=A", headers=H("ta")).status_code == 200
         assert c.get("/api/state?home=A", headers=H("adm")).status_code == 200
-        assert c.get("/api/state").status_code == 401  # whole dashboard view needs admin (B, G2)
+        assert c.get("/api/state").status_code == 401  # whole dashboard view needs admin
         assert c.get("/api/state", headers=H("ta")).status_code == 403
         assert c.get("/api/state", headers=H("adm")).json()["events_hidden"] is False
         assert c.post("/api/coordinate", headers=H("ta")).status_code == 403
@@ -250,7 +250,7 @@ def test_three_phone_burst(client):
         assert len(client.get(f"/api/state?home={h}").json()["pending_changes"]) == 1
 
 
-# ---------------------------------------------------------------- C's interface through the adapter
+# ---------------------------------------------------------------- agent interface through the adapter
 
 from backend.simulation.agent_seam import adapt_announce, adapt_coordinate, adapt_interpret  # noqa: E402
 from backend.simulation.engine_api import find_feasible_schedule as api_find  # noqa: E402
@@ -348,7 +348,7 @@ def test_interpreter_reply_source_labels(monkeypatch):
 
 
 def test_events_visible_before_job_ends(monkeypatch):
-    """G7: Plan 1 reaches /api/state while the coordination job is still running."""
+    """Plan 1 reaches /api/state while the coordination job is still running."""
     async def slow(snapshot, emit, job_id=None, trigger=None):
         emit({"stage": "Home B is reviewing Plan 1"})
         emit({"sender": "coordinator", "recipient": "all_agents", "type": "proposal", "text": "Here's Plan 1.",

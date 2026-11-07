@@ -1,5 +1,5 @@
 // Request → job → confirmation → applied flow for one phone (PRD §11, §16).
-// Uses B's api.message / api.action and useJob for job polling.
+// Uses api.message / api.action and useJob for job polling.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, useJobState, type Api } from '../api';
 import type { HomeId, NeighborhoodState, PendingChange } from '../types';
@@ -105,7 +105,7 @@ export function usePhoneFlow(
     setFlow({ ...IDLE, phase: 'failed', message: errorText(jobError) });
   }, [jobError, flow.jobId, refresh]);
 
-  // Follow the job B's useJobState is polling.
+  // Follow the job useJobState is polling.
   useEffect(() => {
     if (!job || job.id !== flow.jobId) return;
     const kind = flow.kind ?? 'message';
@@ -116,7 +116,7 @@ export function usePhoneFlow(
     }
     // Terminal or confirmation: pull fresh state so the plan / pending change matches.
     refresh();
-    // Outcomes (C, G3): proposed_change, infeasible, needs_clarification, no_change, error,
+    // Outcomes: proposed_change, infeasible, needs_clarification, no_change, error,
     // plus applied / rejected for confirm and reject jobs. result.message is code-written text.
     const outcome = job.result?.outcome ?? '';
     const msg = job.result?.message ?? null;

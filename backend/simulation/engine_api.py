@@ -1,4 +1,4 @@
-"""JSON-in / JSON-out engine entry points for C's MCP server (backend/tools/energy_server.py).
+"""JSON-in / JSON-out engine entry points for the MCP server (backend/tools/energy_server.py).
 
 Snapshots are plain dicts (as sent over MCP) with the NeighborhoodState names:
 generation, requirements_version, capacity_kw, tariff_mode, tariff_label,

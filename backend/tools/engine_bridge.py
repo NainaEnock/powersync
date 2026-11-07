@@ -1,4 +1,4 @@
-"""The one place the MCP server reaches D's deterministic engine.
+"""The one place the MCP server reaches the deterministic engine.
 
 The server calls exactly two engine functions. Both take the snapshot dict the
 backend built (see docs/contract.md, "Agent snapshot"):
@@ -14,7 +14,7 @@ backend built (see docs/contract.md, "Agent snapshot"):
 a new preferred start slot (a soft concession). `Metrics.per_home` is keyed by
 home ID.
 
-By default these come from `backend.simulation.engine_api` (D). Set
+By default these come from `backend.simulation.engine_api`. Set
 POWERSYNC_ENGINE_MODULE to point at another module with the same two
 functions; the agent tests use `backend.agents.tests.fake_engine`.
 """

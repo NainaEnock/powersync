@@ -1,6 +1,6 @@
 """Deterministic engine: metrics, the three schedules, the scheduler, the validator.
 
-Pure functions over a Snapshot. No state, no I/O, no AI. C's MCP tools wrap these.
+Pure functions over a Snapshot. No state, no I/O, no AI. The MCP tools wrap these.
 Every number shown anywhere comes from here.
 """
 

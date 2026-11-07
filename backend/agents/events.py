@@ -1,8 +1,8 @@
 """Thin wrapper over the backend's `emit` callback.
 
-D's emit(event_dict) stores the event immediately and returns its stable ID
+The backend's emit(event_dict) stores the event immediately and returns its stable ID
 (sync or async both work). `emit({"stage": "..."})` sets state.activity.
-D fills id, sequence, job_id, timestamp, revision; C fills the rest.
+The backend fills id, sequence, job_id, timestamp, revision; the agents fill the rest.
 """
 
 from __future__ import annotations

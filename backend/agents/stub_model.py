@@ -1,7 +1,7 @@
 """Model stand-ins that never touch the network.
 
 `ScriptedModel` lets tests decide each reply. `RuleStubModel` is the labeled
-`stub` agent D can run with no OpenRouter key: it reads the same prompts and
+`stub` agent the backend can run with no OpenRouter key: it reads the same prompts and
 answers with simple rules, and every event it produces is marked as
 code-written (`source: system_template`, `data.agent_impl: stub`).
 """

@@ -10,7 +10,7 @@ function homeFromQuery(): HomeId | null {
   return HOME_IDS.includes(q as HomeId) ? (q as HomeId) : null
 }
 
-// Routes: /phone (A's household app) and /dashboard (projector).
+// Routes: /phone (household app) and /dashboard (projector).
 export default function App() {
   const api = useMemo(() => createApi(), [])
   const path = window.location.pathname.replace(/\/+$/, '') || '/'

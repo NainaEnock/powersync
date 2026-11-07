@@ -2,7 +2,7 @@
    Every class is prefixed ps- so it can't collide with the dashboard. */
 
 .ps-phone {
-  /* Shared theme from B's index.css; only the home color is phone-specific. */
+  /* Shared theme from index.css; only the home color is phone-specific. */
   --ps-home: #2563eb;
   --ps-bg: var(--bg, #f3f4ef);
   --ps-card: var(--card, #ffffff);
