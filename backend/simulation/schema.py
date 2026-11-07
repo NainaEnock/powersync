@@ -68,11 +68,11 @@ class Snapshot(BaseModel):
 
     Model arguments never replace these fields: the backend builds every snapshot.
     """
-    scenario_id: str
-    generation: int
-    requirements_version: int
-    revision: int
-    horizon_start: str
+    scenario_id: str = "powersync-evening-v2"
+    generation: int = 0
+    requirements_version: int = 0
+    revision: int = 0
+    horizon_start: str = "2026-07-15T18:00:00-04:00"
     slot_minutes: int = 15
     slots: int = 96
     capacity_kw: float

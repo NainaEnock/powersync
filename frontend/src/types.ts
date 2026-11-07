@@ -1,6 +1,5 @@
-// Mirrors the canonical schemas in docs/PRD.md §10.
-// DRAFT until D merges docs/contract.md at G2. When the contract lands,
-// D's field names win and this file is updated to match exactly.
+// Mirrors docs/contract.md v1 (D owns; wins over the PRD) and PRD §10.
+// Money arrives with 4 decimals: always format to 2 in the UI.
 
 export type HomeId = 'A' | 'B' | 'C'
 export const HOME_IDS: HomeId[] = ['A', 'B', 'C']
@@ -117,11 +116,19 @@ export type ScheduleKind = 'baseline' | 'independent' | 'coordinated'
 export type TariffMode = 'tou' | 'flat'
 
 export interface Coordination {
-  status: string
+  status: 'not_run' | 'committed' | 'stale_tariff'
   explanation: string | null
+  /** With stale_tariff, reasons[0] is "Plan priced under the previous tariff. Coordinate again." */
   reasons: string[]
   job_id: string | null
   source: 'live' | 'stub' | 'deterministic_fallback' | null
+  proposal_id: string | null
+  /** "Plan 2" */
+  plan_name: string | null
+  /** The tariff the committed plan was priced under. */
+  tariff_mode: TariffMode | null
+  /** Always {} in the household view. */
+  home_explanations: Partial<Record<HomeId, string>>
 }
 
 export interface NeighborhoodState {
@@ -149,7 +156,9 @@ export interface NeighborhoodState {
   events: AgentEvent[]
   events_hidden: boolean
   pending_changes: PendingChange[]
-  job_status: string | null
+  job_status: 'idle' | 'running'
+  view: 'dashboard' | 'home'
+  view_home_id: HomeId | null
   data_mode: 'synthetic'
   ai_mode: 'live' | 'unavailable' | 'replay'
   agent_impl: { interpret: 'live' | 'stub'; coordinate: 'live' | 'stub' }
