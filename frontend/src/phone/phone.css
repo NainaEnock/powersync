@@ -519,3 +519,13 @@
 .ps-header .status-badge {
   margin-top: 8px;
 }
+.ps-nowrap {
+  white-space: nowrap;
+}
+/* B's status pills: never wider than the header on small phones. */
+.ps-header .pill {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
