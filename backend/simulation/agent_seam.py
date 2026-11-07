@@ -212,8 +212,13 @@ def adapt_coordinate(fn: Callable[..., Any]) -> CoordinateFn:
     async def coordinate(ctx: CoordinateContext, emit: Emit) -> CoordinateResult:
         trigger = None
         if ctx.trigger:
-            trigger = dict(ctx.trigger_change or {}, text=ctx.trigger, home_id=ctx.trigger_home_id)
-        out = await _call(fn, _snapshot_dict(ctx.snapshot), emit, job_id=ctx.job_id, trigger=trigger)
+            trigger = dict(ctx.trigger_change or {}, kind="requirement_change", text=ctx.trigger,
+                           home_id=ctx.trigger_home_id)
+        snap = _snapshot_dict(ctx.snapshot)
+        snap["next_plan_number"] = ctx.next_plan_number  # name the first proposal "Plan N", not "Plan 1" again
+        snap["previous_schedule"] = ([e.model_dump() for e in ctx.previous_schedule]
+                                     if ctx.previous_schedule else None)  # compare with the current plan
+        out = await _call(fn, snap, emit, job_id=ctx.job_id, trigger=trigger)
         if not isinstance(out, dict) or not isinstance(out.get("schedule"), list):
             raise ValueError("coordinate_neighborhood returned no schedule")
         src = out.get("source")

@@ -14,7 +14,9 @@ from .timefmt import slot_to_time, span_text, usd
 
 
 def noun(t: Task) -> str:
-    """'EV charging' stays, 'Clothes dryer' -> 'clothes dryer'."""
+    """'EV charging' -> 'car charging' (C's wording), 'Clothes dryer' -> 'clothes dryer'."""
+    if t.name.lower().startswith("ev "):
+        return "car " + t.name[3:]
     return t.name if t.name[:2].isupper() else t.name[0].lower() + t.name[1:]
 
 
