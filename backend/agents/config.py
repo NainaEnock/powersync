@@ -43,7 +43,7 @@ def load_settings() -> AgentSettings:
         api_key_present=bool(os.getenv("OPENROUTER_API_KEY", "").strip()),
         call_timeout_s=_f("OPENROUTER_TIMEOUT_SECONDS", 20.0),
         job_budget_s=_f("OPENROUTER_JOB_SECONDS", 45.0),
-        agent_timeout_s=_f("POWERSYNC_AGENT_TIMEOUT_S", 25.0),
+        agent_timeout_s=_f("POWERSYNC_TURN_TIMEOUT_S", 20.0),
         max_rounds=max(1, _i("POWERSYNC_MAX_ROUNDS", 3)),
         max_model_calls=max(1, _i("POWERSYNC_MAX_MODEL_CALLS", 12)),
         max_tool_calls=max(1, _i("POWERSYNC_MAX_TOOL_CALLS", 24)),

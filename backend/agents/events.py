@@ -13,6 +13,10 @@ from typing import Any, Awaitable, Callable
 
 log = logging.getLogger("powersync.agents.events")
 
+class JobStale(Exception):
+    """emit() returned "": the job was reset or superseded. Stop quietly."""
+
+
 EmitFn = Callable[[dict[str, Any]], "str | None | Awaitable[str | None]"]
 
 
@@ -64,6 +68,8 @@ class Emitter:
             "data": data,
         }
         eid = await self._call(event)
+        if eid == "":
+            raise JobStale(self.job_id)
         if eid:
             self.ids.append(eid)
         return eid

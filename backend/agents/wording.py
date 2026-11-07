@@ -201,10 +201,18 @@ def plan_announcement(
 # --- trigger, reviews, asks, commit -----------------------------------------
 
 
+def is_change(trigger: dict[str, Any] | None) -> bool:
+    return bool(trigger and trigger.get("home_id") and trigger.get("task_id"))
+
+
 def trigger_text(snap: dict[str, Any], trigger: dict[str, Any] | None) -> tuple[str, dict[str, str], str]:
-    """(dashboard text, home_views, third-person context for agents)."""
+    """(dashboard text, home_views, third-person context for agents).
+
+    D's trigger: {home_id, task_id, field, old_value, new_value, old_time,
+    new_time, edits, text}, where text is already third person.
+    """
     homes = home_ids(snap)
-    if not trigger or trigger.get("kind") != "requirement_change":
+    if not is_change(trigger):
         reason = (trigger or {}).get("reason") or "The neighborhood asked to coordinate tonight's appliances."
         text = f"{reason} {cheap_hours_text(snap)}"
         return clip(text), {h: clip(text) for h in homes}, text
@@ -213,14 +221,13 @@ def trigger_text(snap: dict[str, Any], trigger: dict[str, Any] | None) -> tuple[
     field = {"deadline_slot": "finish time", "earliest_slot": "earliest start", "preferred_start_slot": "preferred start"}.get(
         trigger.get("field", ""), "requirement"
     )
-    old = trigger.get("old_value")
-    new = trigger.get("new_value")
-    change = f"from {slot_to_time(old)} to {slot_to_time(new)}" if old is not None and new is not None else ""
-    third = f"{home_name(snap, h)}'s resident changed their {label(task)} {field} {change}".strip() + "."
+    old, new = trigger.get("old_value"), trigger.get("new_value")
+    change = f" from {slot_to_time(old)} to {slot_to_time(new)}" if old is not None and new is not None else ""
+    third = trigger.get("text") or f"{home_name(snap, h)}'s resident changed their {label(task)} {field}{change}."
     full = f"{third} Replanning the street around it."
     views = {
-        x: (f"You changed your {label(task)} {field} {change}. Replanning the street.".replace("  ", " ")
-            if x == h else "A neighbor changed one of their requirements. Replanning the street.")
+        x: (f"You changed your {label(task)} {field}{change}. Replanning the street." if x == h
+            else "A neighbor changed one of their requirements. Replanning the street.")
         for x in homes
     }
     return clip(full), views, third
@@ -278,32 +285,3 @@ def reply_views(snap, requester: str, ask: dict[str, Any], agree: bool, cost_del
         mine = f"Your agent declined to move your {label(t)}."
         theirs = f"{home_name(snap, responder)} couldn't adjust its timing this time."
     return {responder: mine, requester: theirs}
-
-
-def commit_text(
-    snap: dict[str, Any],
-    plan_name: str,
-    schedule: list[dict[str, Any]],
-    metrics: dict[str, Any],
-    reference_metrics: dict[str, Any],
-    reference_name: str,
-) -> tuple[str, dict[str, str]]:
-    tasks = tasks_by_id(snap)
-    after = starts(schedule)
-    total = metrics["variable_cost_usd"]
-    ref = reference_metrics["variable_cost_usd"]
-    full = (
-        f"{plan_name} is now the neighborhood plan. Every appliance finishes on time and the street peaks at "
-        f"{metrics['peak_kw']:.1f} kW, under the {snap['capacity_kw']:g} kW limit. Street energy charge "
-        f"{usd(total)}, {usd_vs(total - ref, reference_name)}."
-    )
-    views = {}
-    for h in home_ids(snap):
-        own = sorted((tasks[t] for t in after if tasks[t]["home_id"] == h), key=lambda t: -t["power_kw"])
-        parts = "; ".join(f"your {label(t)} runs {runs_text(t, after[t['id']])}" for t in own)
-        mine = metrics["per_home"].get(h, {}).get("variable_cost_usd", 0.0)
-        prev = reference_metrics["per_home"].get(h, {}).get("variable_cost_usd", 0.0)
-        views[h] = clip(
-            f"Your plan is set: {parts}. Estimated charge {usd(mine)}, {usd_vs(mine - prev, reference_name)}."
-        )
-    return clip(full), views

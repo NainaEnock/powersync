@@ -20,6 +20,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from .config import AgentSettings, load_settings
+from .events import JobStale
 
 log = logging.getLogger("powersync.agents")
 
@@ -238,7 +239,7 @@ async def run_turn(
                 else:
                     try:
                         result = await impl(args)
-                    except BudgetExceeded:
+                    except (BudgetExceeded, JobStale):
                         raise
                     except Exception as exc:  # tool errors go back to the model
                         result = {"error": str(exc)[:300]}

@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from backend.agents import RuleStubModel, ScriptedModel, announce_commit, coordinate_neighborhood, interpret_request
+from backend.agents import RuleStubModel, ScriptedModel, coordinate_neighborhood, interpret_request
 from backend.agents.mcp_client import EnergyTools
 from backend.agents.openrouter import ModelUnavailable, default_model
 from backend.agents.stub_model import rule_responder
@@ -85,7 +85,7 @@ def test_mcp_tools_and_engine_numbers(snapshot, flat_snapshot):
             assert "snapshot" in names["evaluate_schedule"]["input_schema"]["properties"]
 
             pref, _ = await t.call("evaluate_schedule", {"snapshot": snapshot, "schedule": snapshot["baseline_schedule"]})
-            assert pref["metrics"]["peak_kw"] > snapshot["capacity_kw"]
+            assert not pref["valid"] and "15 kW" in pref["summary"]  # D: no metrics for an invalid plan
             p1, _ = await t.call("find_feasible_schedule", {"snapshot": snapshot})
             assert p1["ok"] and p1["metrics"]["capacity_violations"] == 0
             dryer = next(e for e in p1["schedule"] if e["task_id"] == "b_dryer")
@@ -104,10 +104,11 @@ def test_mcp_tools_and_engine_numbers(snapshot, flat_snapshot):
             flat, _ = await t.call("compare_schedules", {"snapshot": flat_snapshot, "baseline": snapshot["baseline_schedule"],
                                                          "candidate": p1["schedule"]})
             assert flat["total"]["cost_delta_usd"] == pytest.approx(0, abs=1e-6)
-            assert flat["total"]["energy_delta_kwh"] == pytest.approx(0, abs=1e-6)
+            assert flat["total"]["peak_before_kw"] == pytest.approx(23.0)
+            assert flat["total"]["energy_change_kwh"] == pytest.approx(0, abs=1e-6)
 
             ctx, _ = await t.call("get_home_context", {"snapshot": snapshot, "home_id": "A"})
-            assert {x["home_id"] for x in ctx["tasks"]} == {"A"}
+            assert "b_dryer" not in json.dumps(ctx) and "c_ev" not in json.dumps(ctx)
 
     run(go())
 
@@ -148,19 +149,18 @@ def test_flat_tariff_no_cost_objections(flat_snapshot):
 
 def test_visible_text_rules(snapshot):
     res, rec = run(_coordinate(snapshot, RuleStubModel()))
-    run(announce_commit(snapshot, res, rec, job_id="job-1"))
     forbidden = re.compile(r"\b(candidate|concession|slot|a_ev|b_dryer|c_ev|a_dish|b_dish|c_dish)\b|\b(1[3-9]|2[0-3]):\d\d\b")
     for e in rec.events:
         texts = [e["text"], *(e.get("home_views") or {}).values()]
         for t in texts:
             assert len(t) <= 800
             assert not forbidden.search(t), t
-    assert rec.of("commit")[0]["proposal_id"] == "P-2"
+    assert not rec.of("commit"), "D sends the commit message, not C"
+    assert res["plan_name"] == "Plan 2" and set(res["home_explanations"]) == {"A", "B", "C"}
 
 
 def test_home_views_are_private(snapshot):
     res, rec = run(_coordinate(snapshot, RuleStubModel()))
-    run(announce_commit(snapshot, res, rec, job_id="job-1"))
     for e in rec.events:
         for home, view in (e.get("home_views") or {}).items():
             for other in "ABC":
@@ -221,20 +221,38 @@ def test_model_dollar_amounts_replaced(snapshot):
 
 
 def test_third_person_trigger(snapshot):
-    trigger = {"kind": "requirement_change", "home_id": "A", "task_id": "a_ev", "field": "deadline_slot",
-               "old_value": 28, "new_value": 20}
-    snapshot["tasks"][0]["deadline_slot"] = 20
+    """D's trigger shape: third-person text already written, no 'kind' key."""
+    trigger = {"home_id": "A", "task_id": "a_ev", "field": "deadline_slot", "old_value": 28, "new_value": 20,
+               "old_time": "1:00 AM", "new_time": "11:00 PM", "edits": [],
+               "text": "Home A's resident changed their EV charging's finish time to 11:00 PM."}
+    for t in snapshot["tasks"]:
+        if t["id"] == "a_ev":
+            t["deadline_slot"] = 20
     model = RuleStubModel()
     res, rec = run(_coordinate(snapshot, model, trigger=trigger))
-    first = rec.events[0]
-    assert "Home A's resident changed their car charging finish time from 1:00 AM to 11:00 PM" in first["text"]
-    assert "car" not in first["home_views"]["B"] and "car" not in first["home_views"]["C"]
-    b_prompts = [m for call in model.calls for m in call
-                 if m["role"] == "system" and "Home B" in m["content"]]
-    assert b_prompts
+    assert rec.events[0]["type"] == "tool_call", "D already announced the change; C doesn't repeat it"
     b_user = [call[-1]["content"] for call in model.calls if "Home B" in call[0]["content"]]
     assert any("Home A's resident changed" in u for u in b_user)
+    a_user = [call[-1]["content"] for call in model.calls if "Home A" in call[0]["content"]]
+    assert all("Home A's resident changed" not in u for u in a_user)
     assert res["outcome"] == "plan_ready" and res["metrics"]["missed_deadlines"] == 0
+
+
+def test_stale_job_stops_quietly(snapshot):
+    class StaleAfter(Recorder):
+        def __call__(self, e):
+            if "stage" not in e and len(self.events) >= 4:
+                return ""
+            return super().__call__(e)
+
+    async def go():
+        rec = StaleAfter()
+        async with EnergyTools() as tools:
+            return await coordinate_neighborhood(snapshot, rec, job_id="j", model=RuleStubModel(), tools=tools), rec
+
+    res, rec = run(go())
+    assert res["outcome"] == "error" and res["schedule"] is None and res["message"].startswith("RESET")
+    assert len(rec.events) == 4
 
 
 # --- interpreter -----------------------------------------------------------
@@ -246,8 +264,9 @@ def test_interpret_deadline_change(snapshot):
     (edit,) = res["proposed_edits"]["edits"]
     assert edit == {"task_id": "a_ev", "field": "deadline_slot", "old_value": 28, "new_value": 20,
                     "old_time": "1:00 AM", "new_time": "11:00 PM"}
-    msg = rec.of("proposal")[0]
-    assert msg["recipient"] == "resident_A" and "11:00 PM" in msg["text"]
+    assert "11:00 PM" in res["explanation"]
+    # D writes the reply to the resident; C only emits tool traffic here.
+    assert all(e["type"].startswith("tool_") for e in rec.events)
 
 
 def test_interpret_impossible_deadline(snapshot):

@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .config import AgentSettings, load_settings
-from .events import Emitter, EmitFn
+from .events import EmitFn, Emitter, JobStale
 from .mcp_client import EnergyTools, ToolUnavailable, get_energy_tools
 from .openrouter import Budget, BudgetExceeded, ModelClient, ModelUnavailable, default_model, structured_turn, with_timeout
 from .prompts import INTERPRETER_SYSTEM, interpret_user
@@ -47,21 +47,28 @@ async def interpret_request(
 ) -> dict[str, Any]:
     """Returns {outcome, message, proposed_edits, explanation, feasible,
     infeasible_reasons, source, usage}. outcome is one of proposed_change,
-    infeasible, needs_clarification, no_change, error."""
+    infeasible, needs_clarification, no_change, error.
+
+    Emits only the activity stage and MCP tool events: D writes the reply to
+    the resident from this result (contract §5)."""
+    try:
+        return await _interpret(snapshot, home_id, text, emit, job_id=job_id, model=model, tools=tools, settings=settings)
+    except JobStale:
+        return {"outcome": "error", "message": "RESET: job is no longer current", "proposed_edits": {"edits": []},
+                "explanation": "", "feasible": False, "infeasible_reasons": [], "source": "live", "usage": {}}
+
+
+async def _interpret(snapshot, home_id, text, emit, *, job_id, model, tools, settings) -> dict[str, Any]:
     s = settings or load_settings()
     model = model or default_model(s) or RuleStubModel()
     em = Emitter(emit, job_id=job_id, impl=model.impl)
     budget = Budget.from_settings(s)
     planner = Planner(tools or get_energy_tools(), em, budget, snapshot)
-    agent, resident = f"agent_{home_id}", f"resident_{home_id}"
+    agent = f"agent_{home_id}"
     name = home_name(snapshot, home_id)
     own = [t for t in snapshot["tasks"] if t["home_id"] == home_id]
     if not own:
         return _result("error", f"UNKNOWN_HOME: {home_id}", model, budget)
-
-    def reply(type_: str, msg: str, **kw):
-        return em.send(sender=agent, recipient=resident, type=type_, text=clip(msg),
-                       home_views={home_id: clip(msg)}, **kw)
 
     await em.stage(f"{name}'s agent is reading the request")
     task_info = [
@@ -95,13 +102,11 @@ async def interpret_request(
         )
     except (ModelUnavailable, BudgetExceeded, ValidationError, ValueError) as exc:
         log.warning("interpret failed: %s", exc)
-        await reply("error", "Your agent couldn't understand that right now, so nothing was changed. Please try again.")
         await em.stage(None)
         return _result("error", f"AI_UNAVAILABLE: {exc}", model, budget)
 
     if not out.understood or not out.edits:
         q = clean_model_text(out.question or "", snapshot, set()) or "Could you say which appliance and what time you mean?"
-        await reply("info", q, model_written=bool(out.question))
         await em.stage(None)
         return _result("needs_clarification", q, model, budget)
 
@@ -120,7 +125,6 @@ async def interpret_request(
         })
     if not edits:
         msg = "That's already how your plan is set up, so nothing needs to change."
-        await reply("info", msg)
         await em.stage(None)
         return _result("no_change", msg, model, budget)
 
@@ -138,7 +142,6 @@ async def interpret_request(
                     + (f": {res['reasons'][0]}" if res.get("reasons") else ".")
                 ]
         except (ToolUnavailable, BudgetExceeded) as exc:
-            await reply("error", "Your agent couldn't check that change with the planner right now. Nothing was changed.")
             await em.stage(None)
             return _result("error", f"PLANNER_UNAVAILABLE: {exc}", model, budget)
 
@@ -148,14 +151,12 @@ async def interpret_request(
     )
     if reasons:
         msg = f"I can't change {change_words}. " + " ".join(reasons)
-        await reply("info", msg, data={"feasible": False})
         await em.stage(None)
         res = _result("infeasible", clip(msg), model, budget)
         res.update(proposed_edits={"edits": edits}, feasible=False, infeasible_reasons=reasons, explanation=clip(msg))
         return res
 
     msg = f"Change {change_words}? Confirm on your phone and I'll replan with the neighbors."
-    await reply("proposal", msg, data={"feasible": True})
     await em.stage(None)
     res = _result("proposed_change", clip(msg), model, budget)
     res.update(proposed_edits={"edits": edits}, feasible=True, infeasible_reasons=[], explanation=clip(msg))

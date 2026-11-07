@@ -107,6 +107,8 @@ def _home_label(snapshot: dict[str, Any], home_id: str) -> str:
 def get_home_context(home_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
     """One home's tasks, deadlines, background use, and a tariff summary."""
     _check_snapshot(snapshot)
+    if hasattr(engine(), "get_home_context"):
+        return engine().get_home_context(snapshot, home_id)
     tasks = [t for t in snapshot["tasks"] if t["home_id"] == home_id]
     if not tasks:
         raise ValueError(f"unknown home {home_id!r}")
@@ -155,10 +157,12 @@ def evaluate_schedule(snapshot: dict[str, Any], schedule: list[dict[str, Any]]) 
     """Metrics and validation findings for a schedule. Changes nothing."""
     _check_snapshot(snapshot)
     res = engine().evaluate_schedule(snapshot, _canonical(snapshot, schedule))
-    m = res["metrics"]
-    res["summary"] = ("Valid: " if res.get("valid") else "Not valid: ") + _metrics_line(m, snapshot["capacity_kw"])
-    if res.get("findings"):
-        res["summary"] += ". " + "; ".join(res["findings"][:3])
+    if not res.get("summary"):
+        m = res.get("metrics")
+        line = _metrics_line(m, snapshot["capacity_kw"]) if m else "no metrics"
+        res["summary"] = ("Valid: " if res.get("valid") else "Not valid: ") + line
+        if res.get("findings"):
+            res["summary"] += ". " + "; ".join(res["findings"][:3])
     return res
 
 
@@ -178,10 +182,11 @@ def find_feasible_schedule(
     )
     if res.get("ok") and res.get("schedule"):
         ev = engine().evaluate_schedule(snapshot, _canonical(snapshot, res["schedule"]))
-        res["metrics"] = ev["metrics"]
+        res["metrics"] = ev.get("metrics")
         res["valid"] = ev.get("valid", False)
         res["findings"] = ev.get("findings", [])
-        res["summary"] = "Found a plan: " + _metrics_line(ev["metrics"], snapshot["capacity_kw"])
+        res["summary"] = ("Found a plan: " + _metrics_line(ev["metrics"], snapshot["capacity_kw"])
+                          if ev.get("metrics") else "Found a plan, but it didn't pass the checks")
     else:
         why = "; ".join(res.get("reasons") or []) or "no reason given"
         kind = "No plan is possible" if res.get("proven_impossible") else "No plan found within the search budget"
@@ -193,58 +198,80 @@ def find_feasible_schedule(
 def compare_schedules(
     snapshot: dict[str, Any], baseline: list[dict[str, Any]], candidate: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Per-home and total differences between two schedules."""
+    """Per-home and total cost differences between two schedules, plus what moved."""
     _check_snapshot(snapshot)
     tasks = _tasks(snapshot)
     base = _canonical(snapshot, baseline)
     cand = _canonical(snapshot, candidate)
-    eb = engine().evaluate_schedule(snapshot, base)
     ec = engine().evaluate_schedule(snapshot, cand)
-    mb, mc = eb["metrics"], ec["metrics"]
-    homes = sorted(set(mb.get("per_home", {})) | set(mc.get("per_home", {})))
-    per_home = {}
-    for h in homes:
-        b = mb["per_home"].get(h, {})
-        c = mc["per_home"].get(h, {})
-        per_home[h] = {
-            "cost_before_usd": round(b.get("variable_cost_usd", 0.0), 4),
-            "cost_after_usd": round(c.get("variable_cost_usd", 0.0), 4),
-            "cost_delta_usd": round(c.get("variable_cost_usd", 0.0) - b.get("variable_cost_usd", 0.0), 4),
-            "energy_delta_kwh": round(c.get("energy_kwh", 0.0) - b.get("energy_kwh", 0.0), 6),
+    if hasattr(engine(), "compare_schedules"):
+        d = engine().compare_schedules(snapshot, base, cand)
+    else:
+        d = _compare_from_evaluate(snapshot, base, cand)
+
+    def delta(v: dict[str, Any], key: str) -> float:
+        return float(v.get(f"{key}_change_usd", v.get(f"{key}_delta_usd", 0.0)))
+
+    per_home = {
+        h: {
+            "cost_before_usd": v["cost_before_usd"],
+            "cost_after_usd": v["cost_after_usd"],
+            "cost_delta_usd": round(delta(v, "cost"), 4),
         }
-    bstart = {e["task_id"]: e["start_slot"] for e in base}
+        for h, v in d["per_home"].items()
+    }
+    t = d["total"]
+
+    def derived(which: str, peak: float) -> dict[str, Any]:
+        return {
+            "variable_cost_usd": t[f"cost_{which}_usd"],
+            "peak_kw": peak,
+            "per_home": {h: {"variable_cost_usd": v[f"cost_{which}_usd"]} for h, v in d["per_home"].items()},
+        }
+
+    baseline_metrics = derived("before", t["peak_before_kw"])
+    candidate_metrics = ec.get("metrics") or derived("after", t["peak_after_kw"])
     moved = [
         {
-            "task_id": e["task_id"],
-            "home_id": e["home_id"],
-            "from_slot": bstart[e["task_id"]],
-            "to_slot": e["start_slot"],
-            "deadline_slot": tasks[e["task_id"]]["deadline_slot"],
+            "task_id": m["task_id"],
+            "home_id": m["home_id"],
+            "from_slot": m["from_slot"],
+            "to_slot": m["to_slot"],
+            "deadline_slot": tasks[m["task_id"]]["deadline_slot"],
         }
-        for e in cand
-        if e["task_id"] in bstart and bstart[e["task_id"]] != e["start_slot"]
+        for m in d["moved"]
     ]
-    delta = mc["variable_cost_usd"] - mb["variable_cost_usd"]
+    cost_delta = t["cost_after_usd"] - t["cost_before_usd"]
     return {
-        "baseline_metrics": mb,
-        "candidate_metrics": mc,
-        "candidate_valid": ec.get("valid", False),
+        "baseline_metrics": baseline_metrics,
+        "candidate_metrics": candidate_metrics,
+        "candidate_valid": bool(ec.get("valid")),
         "candidate_findings": ec.get("findings", []),
-        "total": {
-            "cost_before_usd": round(mb["variable_cost_usd"], 4),
-            "cost_after_usd": round(mc["variable_cost_usd"], 4),
-            "cost_delta_usd": round(delta, 4),
-            "peak_before_kw": mb["peak_kw"],
-            "peak_after_kw": mc["peak_kw"],
-            "energy_delta_kwh": round(mc["energy_kwh"] - mb["energy_kwh"], 6),
-        },
+        "total": {**t, "cost_delta_usd": round(cost_delta, 4)},
         "per_home": per_home,
         "moved": moved,
         "summary": (
             f"{len(moved)} appliance{'s' if len(moved) != 1 else ''} moved; "
-            f"street charge {usd(mb['variable_cost_usd'])} to {usd(mc['variable_cost_usd'])}; "
-            f"peak {mb['peak_kw']:.1f} to {mc['peak_kw']:.1f} kW"
+            f"street charge {usd(t['cost_before_usd'])} to {usd(t['cost_after_usd'])}; "
+            f"peak {t['peak_before_kw']:.1f} to {t['peak_after_kw']:.1f} kW"
         ),
+    }
+
+
+def _compare_from_evaluate(snapshot, base, cand) -> dict[str, Any]:
+    """For an engine module without compare_schedules (needs metrics even when invalid)."""
+    mb = engine().evaluate_schedule(snapshot, base)["metrics"]
+    mc = engine().evaluate_schedule(snapshot, cand)["metrics"]
+    bstart = {e["task_id"]: e["start_slot"] for e in base}
+    return {
+        "total": {"cost_before_usd": mb["variable_cost_usd"], "cost_after_usd": mc["variable_cost_usd"],
+                  "peak_before_kw": mb["peak_kw"], "peak_after_kw": mc["peak_kw"]},
+        "per_home": {h: {"cost_before_usd": mb["per_home"][h]["variable_cost_usd"],
+                         "cost_after_usd": mc["per_home"][h]["variable_cost_usd"],
+                         "cost_change_usd": mc["per_home"][h]["variable_cost_usd"] - mb["per_home"][h]["variable_cost_usd"]}
+                     for h in mb["per_home"]},
+        "moved": [{"task_id": e["task_id"], "home_id": e["home_id"], "from_slot": bstart[e["task_id"]], "to_slot": e["start_slot"]}
+                  for e in cand if e["task_id"] in bstart and bstart[e["task_id"]] != e["start_slot"]],
     }
 
 

@@ -6,8 +6,8 @@ neighbor changes are possible ("options"), and that no deadline is relaxed.
 What agents decide: whether to accept a plan, which checked option to ask a
 neighbor for, whether to agree to a neighbor's request, and their own words.
 
-This module never commits. It returns the plan; D validates and commits, then
-calls `announce_commit` so the commit message appears only after the commit.
+This module never commits and never announces a commit. It returns the plan;
+D validates it, emits the safety-check and commit messages, and commits.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .config import AgentSettings, load_settings
-from .events import Emitter, EmitFn
+from .events import EmitFn, Emitter, JobStale
 from .mcp_client import EnergyTools, ToolUnavailable, get_energy_tools
 from .openrouter import Budget, BudgetExceeded, ModelClient, ModelUnavailable, default_model, structured_turn, with_timeout
 from .prompts import household_system, neighbor_ask_user, review_user
@@ -29,7 +29,7 @@ from .schemas import NeighborReply, ReviewOutput
 from .timefmt import slot_range, slot_to_time, usd, usd_change
 from .toolcalls import Planner
 from .wording import (
-    ask_views, cheap_hours_text, clean_model_text, clip, commit_text, expensive_share, expensive_slots,
+    ask_views, cheap_hours_text, clean_model_text, clip, expensive_share, expensive_slots, is_change,
     home_ids, home_name, is_flat, label, option_ask_text, plan_announcement, possessive, reply_views,
     review_view, runs_text, starts, tasks_by_id, trigger_text,
 )
@@ -47,6 +47,7 @@ class Plan:
     metrics: dict[str, Any]
     pins: dict[str, int] = field(default_factory=dict)
     summary: str = ""
+    views: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -84,24 +85,15 @@ async def coordinate_neighborhood(
     neg = _Negotiation(snapshot, emit, job_id, trigger, model, tools or get_energy_tools(), s)
     try:
         return await neg.run()
+    except JobStale:
+        log.info("job %s went stale (reset); stopping", job_id)
+        return {"outcome": "error", "message": "RESET: job is no longer current", "schedule": None,
+                "source": "live", "proposal_id": None}
     finally:
         try:
             await neg.em.stage(None)
         except Exception:
             pass
-
-
-async def announce_commit(snapshot: dict[str, Any], result: dict[str, Any], emit: EmitFn, *, job_id: str) -> str | None:
-    """D calls this right after committing `result`. Emits the commit message."""
-    ref = result["commit_reference"]
-    plan_name = next(p["name"] for p in result["plans"] if p["proposal_id"] == result["proposal_id"])
-    text, views = commit_text(snapshot, plan_name, result["schedule"], result["metrics"], ref["metrics"], ref["name"])
-    em = Emitter(emit, job_id=job_id)
-    return await em.send(
-        sender="coordinator", recipient="all_agents", type="commit", text=text,
-        round=result.get("rounds"), proposal_id=result["proposal_id"], home_views=views,
-        data={"source": result["source"]},
-    )
 
 
 class _Negotiation:
@@ -129,7 +121,9 @@ class _Negotiation:
 
     async def run(self) -> dict[str, Any]:
         text, views, self.context = trigger_text(self.snap, self.trigger)
-        await self.em.send(sender="coordinator", recipient="all_agents", type="info", text=text, round=1, home_views=views)
+        if not is_change(self.trigger):  # D already announced a confirmed change (contract §5)
+            await self.em.send(sender="coordinator", recipient="all_agents", type="info", text=text, round=1,
+                               home_views=views)
         await self.em.stage("Building Plan 1")
         try:
             plan1 = await self._first_plan()
@@ -220,7 +214,7 @@ class _Negotiation:
             self.snap, plan.proposal_id, plan.name, plan.schedule, plan.metrics,
             previous=self._baseline(), previous_name="everyone's preferred times", previous_metrics=self.baseline_metrics,
         )
-        plan.summary = text
+        plan.summary, plan.views = text, views
         self.plans.append(plan)
         await self.em.send(sender="coordinator", recipient="all_agents", type="proposal", text=text, round=1,
                            proposal_id=plan.proposal_id, home_views=views)
@@ -248,7 +242,7 @@ class _Negotiation:
             self.snap, pid, name, plan.schedule, plan.metrics,
             previous=current.schedule, previous_name=current.name, previous_metrics=current.metrics,
         )
-        plan.summary = text
+        plan.summary, plan.views = text, views
         self.plans.append(plan)
         await self.em.send(sender="coordinator", recipient="all_agents", type="proposal", text=text,
                            round=rnd + 1, proposal_id=pid, home_views=views)
@@ -426,7 +420,7 @@ class _Negotiation:
     def _context_for(self, home: str) -> str:
         """Third-person trigger context; the triggering home hears it as 'your resident'."""
         t = self.trigger or {}
-        if t.get("kind") == "requirement_change" and t.get("home_id") == home:
+        if is_change(t) and t.get("home_id") == home:
             return "Your own resident just changed one of your requirements; the deadlines below include it."
         return self.context
 
@@ -511,6 +505,11 @@ class _Negotiation:
             "outcome": outcome,
             "message": message,
             "proposal_id": plan.proposal_id if plan else None,
+            "plan_name": plan.name if plan else None,
+            "pins": plan.pins if plan else {},
+            "home_explanations": dict(plan.views) if plan else {},
+            "model_calls": self.budget.model_calls,
+            "tool_calls": self.budget.tool_calls,
             "schedule": plan.schedule if plan else None,
             "metrics": plan.metrics if plan else None,
             "source": source,
