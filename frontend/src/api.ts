@@ -259,11 +259,17 @@ export function usePoll<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: u
 
 const JOB_STOP: Job['status'][] = ['completed', 'failed', 'awaiting_confirmation']
 
-/** Poll one job until it completes, fails, or needs confirmation. Pass null to stop. */
-export function useJob(api: Api, jobId: string | null): Job | null {
-  const [job, setJob] = useState<Job | null>(null)
+export interface JobPoll {
+  job: Job | null
+  /** Last poll error. NOT_FOUND means the job is gone (e.g. after a reset) and polling has stopped. */
+  error: ApiError | null
+}
+
+/** Poll one job until it completes, fails, needs confirmation, or 404s. Pass null to stop. */
+export function useJobState(api: Api, jobId: string | null): JobPoll {
+  const [poll, setPoll] = useState<JobPoll>({ job: null, error: null })
   useEffect(() => {
-    setJob(null)
+    setPoll({ job: null, error: null })
     if (!jobId) return
     let cancelled = false
     let timer: number | undefined
@@ -272,12 +278,13 @@ export function useJob(api: Api, jobId: string | null): Job | null {
       try {
         const j = await api.job(jobId, ctrl.signal)
         if (cancelled) return
-        setJob(j)
+        setPoll({ job: j, error: null })
         if (JOB_STOP.includes(j.status)) return
       } catch (e) {
         if (cancelled || (e as Error).name === 'AbortError') return
-        // NOT_FOUND after a reset: stop polling.
-        if (e instanceof ApiError && e.code === 'NOT_FOUND') return
+        const err = e instanceof ApiError ? e : new ApiError('UNKNOWN', String(e), 0)
+        setPoll((p) => ({ job: p.job, error: err }))
+        if (err.code === 'NOT_FOUND') return
       }
       timer = window.setTimeout(run, POLL_MS)
     }
@@ -288,7 +295,12 @@ export function useJob(api: Api, jobId: string | null): Job | null {
       ctrl.abort()
     }
   }, [api, jobId])
-  return job
+  return poll
+}
+
+/** Same as useJobState but returns only the job (kept for existing callers). */
+export function useJob(api: Api, jobId: string | null): Job | null {
+  return useJobState(api, jobId).job
 }
 
 /** Health, polled more slowly. Drives the status badge. */
