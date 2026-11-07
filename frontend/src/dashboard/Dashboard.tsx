@@ -1,21 +1,35 @@
-import { ArrowUpRight, Loader2, RotateCcw, Smartphone, Waves, Zap } from 'lucide-react'
+import { ArrowUpRight, ExternalLink, LayoutDashboard, Loader2, MessagesSquare, RotateCcw, Smartphone, Waves, Zap } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, useHealth, useJobState, usePoll, type Api } from '../api'
 import { StatusBadge } from '../StatusBadge'
-import type { ErrorCode } from '../types'
+import type { ErrorCode, NeighborhoodState } from '../types'
 import { AdminCode } from './AdminCode'
 import { ConversationPanel } from './ConversationPanel'
 import { DemandChart } from './DemandChart'
 import { HomeCards } from './HomeCards'
 import { MetricTiles } from './MetricTiles'
 import { Timeline } from './Timeline'
+import { usePacedEvents } from './usePacedEvents'
 import './dashboard.css'
+
+type View = 'overview' | 'chat'
+const viewFromUrl = (): View => (new URLSearchParams(window.location.search).get('view') === 'chat' ? 'chat' : 'overview')
 
 const FRIENDLY: Partial<Record<ErrorCode, string>> = {
   JOB_RUNNING: 'Planning is running. Try again in a moment.',
   RATE_LIMITED: 'Busy. Try again in a moment.',
   UNAUTHORIZED: 'Enter the admin code first.',
   FORBIDDEN: 'That admin code is wrong.',
+}
+
+/** Compact side summary for the Conversation tab, so the result stays in view while people read. */
+function PlanSummary({ state }: { state: NeighborhoodState }) {
+  return (
+    <aside className="chat-side">
+      <MetricTiles state={state} />
+      <HomeCards state={state} />
+    </aside>
+  )
 }
 
 export function Dashboard({ api }: { api: Api }) {
@@ -36,6 +50,21 @@ export function Dashboard({ api }: { api: Api }) {
   const armTimer = useRef<number | undefined>(undefined)
 
   const running = s?.job_status === 'running' || job.job?.status === 'queued' || job.job?.status === 'running'
+  const paced = usePacedEvents(s?.events, s?.generation)
+
+  const [view, setViewState] = useState<View>(viewFromUrl)
+  const setView = (v: View) => {
+    setViewState(v)
+    const url = new URL(window.location.href)
+    if (v === 'chat') url.searchParams.set('view', 'chat')
+    else url.searchParams.delete('view')
+    window.history.replaceState(null, '', url.toString())
+  }
+  const chatUrl = (() => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', 'chat')
+    return url.pathname + url.search
+  })()
 
   const run = async (kind: 'coordinate' | 'reset' | 'tariff', fn: () => Promise<unknown>) => {
     setActionError(null)
@@ -146,23 +175,44 @@ export function Dashboard({ api }: { api: Api }) {
         <div className="banner banner-warn">{s.coordination.reasons[0] ?? 'Plan priced under the previous tariff. Coordinate again.'}</div>
       )}
 
-      <div className="dash-main">
-        <div className="dash-left">
-          {s && (
-            <>
-              <MetricTiles state={s} />
-              <DemandChart
-                state={s}
-                onFlatChange={setFlat}
-                tariffBusy={pending === 'tariff' || running || api.mode === 'sample'}
-              />
-              <Timeline state={s} />
-              <HomeCards state={s} />
-            </>
-          )}
+      <nav className="tabs" role="tablist" aria-label="Dashboard view">
+        <button role="tab" aria-selected={view === 'overview'} className={view === 'overview' ? 'on' : ''} onClick={() => setView('overview')}>
+          <LayoutDashboard size={15} /> Overview
+        </button>
+        <button role="tab" aria-selected={view === 'chat'} className={view === 'chat' ? 'on' : ''} onClick={() => setView('chat')}>
+          <MessagesSquare size={15} /> Conversation
+          {paced.shown.length > 0 && <span className="tab-count">{paced.shown.length}</span>}
+          {paced.queued > 0 && <span className="tab-live" aria-label="new messages arriving" />}
+        </button>
+        <a className="tab-link" href={chatUrl} target="_blank" rel="noreferrer" title="Open the conversation in its own browser tab">
+          <ExternalLink size={13} /> Open conversation in a new window
+        </a>
+      </nav>
+
+      {view === 'overview' ? (
+        <div className="dash-main">
+          <div className="dash-left">
+            {s && (
+              <>
+                <MetricTiles state={s} />
+                <DemandChart
+                  state={s}
+                  onFlatChange={setFlat}
+                  tariffBusy={pending === 'tariff' || running || api.mode === 'sample'}
+                />
+                <Timeline state={s} />
+                <HomeCards state={s} />
+              </>
+            )}
+          </div>
+          <ConversationPanel state={s} paced={paced} needsCode={needsCode} />
         </div>
-        <ConversationPanel state={s} needsCode={needsCode} />
-      </div>
+      ) : (
+        <div className="dash-chat">
+          <ConversationPanel state={s} paced={paced} needsCode={needsCode} size="full" />
+          {s && <PlanSummary state={s} />}
+        </div>
+      )}
     </div>
   )
 }

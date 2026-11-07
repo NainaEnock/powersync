@@ -365,3 +365,24 @@ def test_events_visible_before_job_ends(monkeypatch):
         assert c.get("/api/state?home=B").json()["activity"] == "Planning with the neighbors…"
         assert wait_job(c, jid)["status"] == "completed"
         assert c.get("/api/state").json()["activity"] is None
+
+
+def test_plan_numbers_continue_after_a_multi_plan_job(monkeypatch):
+    """A job that proposes Plan 1 and commits Plan 2 must make the next replan 'Plan 3' (not 'Plan 2' again)."""
+    seen = []
+
+    async def two_plans(ctx, emit):
+        seen.append(ctx.next_plan_number)
+        base = await stub_coordinate(ctx, lambda e: "")
+        n = ctx.next_plan_number
+        return base.model_copy(update={
+            "proposal_id": f"P-{n + 1}", "plan_name": f"Plan {n + 1}",
+            "raw": {"plans": [{"proposal_id": f"P-{n}"}, {"proposal_id": f"P-{n + 1}"}]},
+        })
+
+    with make_client(monkeypatch, coordinate=two_plans) as c:
+        wait_job(c, c.post("/api/coordinate", json={}).json()["job_id"])
+        assert c.get("/api/state").json()["coordination"]["plan_name"] == "Plan 2"
+        wait_job(c, c.post("/api/coordinate", json={}).json()["job_id"])
+        assert seen == [1, 3]
+        assert c.get("/api/state").json()["coordination"]["plan_name"] == "Plan 4"

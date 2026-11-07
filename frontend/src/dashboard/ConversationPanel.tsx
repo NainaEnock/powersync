@@ -1,8 +1,10 @@
 // Live agent conversation (PRD §12.4). Shows only what the backend stored: no invented text.
 // Sort by sequence, group by round, tag plans, activity line, Follow and Pause, hidden state.
-import { ArrowDownToLine, Check, CircleAlert, Lock, Pause, Play, ShieldCheck, Wrench, X } from 'lucide-react'
+// New messages arrive one at a time (see usePacedEvents) so people can read them.
+import { ArrowDownToLine, Check, CircleAlert, FastForward, Lock, Pause, Play, ShieldCheck, Wrench, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, Home, NeighborhoodState } from '../types'
+import type { Paced } from './usePacedEvents'
 
 const COORD = '#2f5d46'
 
@@ -30,6 +32,8 @@ function who(p: string): string {
   }
 }
 
+const isTool = (e: AgentEvent) => e.type === 'tool_call' || e.type === 'tool_result'
+
 const STANCE: Record<string, { label: string; cls: string; Icon: typeof Check }> = {
   accept: { label: 'Accepts', cls: 'ok', Icon: Check },
   agree: { label: 'Agrees', cls: 'ok', Icon: Check },
@@ -55,28 +59,31 @@ function groupByRound(events: AgentEvent[]): Group[] {
   return groups
 }
 
-export function ConversationPanel({ state, needsCode }: { state: NeighborhoodState | null; needsCode: boolean }) {
+export function ConversationPanel({ state, paced, needsCode, size = 'side' }: {
+  state: NeighborhoodState | null
+  paced: Paced
+  needsCode: boolean
+  size?: 'side' | 'full'
+}) {
   const [follow, setFollow] = useState(true)
   const [paused, setPaused] = useState(false)
   const [frozen, setFrozen] = useState<AgentEvent[] | null>(null)
-  const [showTools, setShowTools] = useState(true)
+  const [showTools, setShowTools] = useState(size === 'side')
   const listRef = useRef<HTMLDivElement>(null)
 
-  const live = useMemo(
-    () => [...(state?.events ?? [])].sort((a, b) => a.sequence - b.sequence),
-    [state?.events],
-  )
+  const live = paced.shown
   const shown = paused && frozen ? frozen : live
-  const newWhilePaused = paused && frozen ? live.length - frozen.length : 0
-  const visible = showTools ? shown : shown.filter((e) => e.type !== 'tool_call' && e.type !== 'tool_result')
+  const newWhilePaused = paused && frozen ? live.length - frozen.length + paced.queued : 0
+  const visible = showTools ? shown : shown.filter((e) => !isTool(e))
   const byId = useMemo(() => new Map(live.map((e) => [e.id, e])), [live])
   const groups = useMemo(() => groupByRound(visible), [visible])
   const homes: Home[] = state?.homes ?? []
   const colors = useMemo(() => new Map(homes.map((h) => [h.id, h.color])), [homes])
+  const typing = !paused && paced.next && (showTools || !isTool(paced.next)) ? paced.next : null
 
   useEffect(() => {
     if (follow && !paused && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
-  }, [visible.length, follow, paused])
+  }, [visible.length, typing?.id, follow, paused])
 
   const togglePause = () => {
     if (paused) {
@@ -92,13 +99,18 @@ export function ConversationPanel({ state, needsCode }: { state: NeighborhoodSta
   const running = state?.job_status === 'running'
 
   return (
-    <section className="card convo" aria-label="Agent conversation">
+    <section className={`card convo convo-${size}`} aria-label="Agent conversation">
       <div className="card-head">
         <div>
-          <div className="eyebrow">{running ? 'Live negotiation' : 'Negotiation log'}</div>
+          <div className="eyebrow">{running || paced.queued > 0 ? 'Live negotiation' : 'Negotiation log'}</div>
           <h2>Agent Conversation</h2>
         </div>
         <div className="convo-controls">
+          {paced.queued > 1 && (
+            <button className="chip" onClick={paced.skip} title="Show every waiting message now">
+              <FastForward size={13} /> Skip ({paced.queued})
+            </button>
+          )}
           <button className={`chip ${follow ? 'on' : ''}`} onClick={() => setFollow((f) => !f)} aria-pressed={follow} title="Auto-scroll to the newest message">
             <ArrowDownToLine size={13} /> Follow
           </button>
@@ -132,20 +144,34 @@ export function ConversationPanel({ state, needsCode }: { state: NeighborhoodSta
       <div className="convo-list" ref={listRef}>
         {hidden ? (
           <div className="convo-empty"><Lock size={16} /> Conversation hidden. Enter the admin code to view.</div>
-        ) : visible.length === 0 ? (
+        ) : visible.length === 0 && !typing ? (
           <div className="convo-empty muted">No messages yet. Press Coordinate neighborhood to start.</div>
         ) : (
-          groups.map((g) => (
-            <div key={g.key + g.events[0].id} className="round">
-              <div className="round-title">{g.title}</div>
-              {g.events.map((e) => (
-                <EventItem key={e.id} e={e} replyTo={e.reply_to_event_id ? byId.get(e.reply_to_event_id) : undefined} colors={colors} />
-              ))}
-            </div>
-          ))
+          <>
+            {groups.map((g) => (
+              <div key={g.key + g.events[0].id} className="round">
+                <div className="round-title">{g.title}</div>
+                {g.events.map((e) => (
+                  <EventItem key={e.id} e={e} replyTo={e.reply_to_event_id ? byId.get(e.reply_to_event_id) : undefined} colors={colors} />
+                ))}
+              </div>
+            ))}
+            {typing && <TypingBubble e={typing} colors={colors} />}
+          </>
         )}
       </div>
     </section>
+  )
+}
+
+function TypingBubble({ e, colors }: { e: AgentEvent; colors: Map<string, string> }) {
+  const home = homeOf(e.sender)
+  const accent = home ? colors.get(home) : COORD
+  return (
+    <div className="typing" aria-hidden style={{ borderColor: `color-mix(in srgb, ${accent} 30%, white)` }}>
+      <span className="typing-who">{isTool(e) ? 'Energy tools' : who(e.sender)}</span>
+      <span className="typing-dots"><i /><i /><i /></span>
+    </div>
   )
 }
 
@@ -162,11 +188,11 @@ function EventItem({ e, replyTo, colors }: { e: AgentEvent; replyTo?: AgentEvent
   const plan = planName(e.proposal_id)
   const stance = typeof e.data?.stance === 'string' ? STANCE[e.data.stance] : undefined
 
-  if (e.type === 'tool_call' || e.type === 'tool_result') {
+  if (isTool(e)) {
     const tool = typeof e.data?.tool === 'string' ? e.data.tool : 'tool'
     const ms = typeof e.data?.latency_ms === 'number' ? e.data.latency_ms : null
     return (
-      <div className={`tool ${e.type === 'tool_result' ? 'result' : ''}`}>
+      <div className={`tool appear ${e.type === 'tool_result' ? 'result' : ''}`}>
         <Wrench size={13} aria-hidden className="tool-icon" />
         <div className="tool-body">
           <div className="tool-head">
@@ -186,7 +212,7 @@ function EventItem({ e, replyTo, colors }: { e: AgentEvent; replyTo?: AgentEvent
 
   if (e.type === 'commit') {
     return (
-      <article className="msg msg-commit">
+      <article className="msg msg-commit appear">
         <header>
           <ShieldCheck size={15} aria-hidden />
           <span className="msg-who">Applied · revision {e.revision}</span>
@@ -205,7 +231,7 @@ function EventItem({ e, replyTo, colors }: { e: AgentEvent; replyTo?: AgentEvent
     : undefined
 
   return (
-    <article className={`msg type-${e.type}`} style={style}>
+    <article className={`msg appear type-${e.type}`} style={style}>
       <header>
         <span className="msg-who">{who(e.sender)}</span>
         {e.recipient !== e.sender && <span className="muted msg-to">to {who(e.recipient)}</span>}

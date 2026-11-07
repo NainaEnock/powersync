@@ -638,19 +638,42 @@ function senderLabel(sender: string, homeId: HomeId): string {
   return sender;
 }
 
+/** The updates a resident needs: plan commits, their own requests and their agent's replies to them,
+ *  problems, and street-wide notices (deadline changes, tariff changes). Reviews and negotiation
+ *  chatter stay in the full conversation, which is collapsed by default. */
+function isKeyUpdate(ev: AgentEvent, homeId: HomeId): boolean {
+  if (ev.type === 'commit' || ev.type === 'error') return true;
+  if (ev.sender === `resident_${homeId}` || ev.recipient === `resident_${homeId}`) return true;
+  return ev.type === 'info' && ev.sender === 'backend';
+}
+
+const KEY_UPDATES_SHOWN = 4;
+
 function Messages({ homeId, state }: { homeId: HomeId; state: NeighborhoodState }) {
   const events = useMemo(() => [...state.events].sort((a, b) => a.sequence - b.sequence), [state.events]);
+  const updates = useMemo(() => events.filter((e) => isKeyUpdate(e, homeId)), [events, homeId]);
+  const recent = updates.slice(-KEY_UPDATES_SHOWN).reverse(); // newest first
   return (
     <section className="ps-card">
-      <h2>Messages</h2>
-      {events.length === 0 ? (
-        <p className="ps-muted">No messages yet. Your agent's conversations about your home will appear here.</p>
+      <h2>Updates</h2>
+      {recent.length === 0 ? (
+        <p className="ps-muted">No updates yet. When your plan changes, you'll see it here.</p>
       ) : (
         <ol className="ps-messages">
-          {events.map((ev) => (
+          {recent.map((ev) => (
             <MessageItem key={ev.id} ev={ev} homeId={homeId} />
           ))}
         </ol>
+      )}
+      {events.length > 0 && (
+        <details className="ps-convo">
+          <summary>Show full conversation ({events.length} messages)</summary>
+          <ol className="ps-messages">
+            {events.map((ev) => (
+              <MessageItem key={ev.id} ev={ev} homeId={homeId} />
+            ))}
+          </ol>
+        </details>
       )}
     </section>
   );
