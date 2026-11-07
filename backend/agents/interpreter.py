@@ -146,7 +146,7 @@ async def _interpret(snapshot, home_id, text, emit, *, job_id, model, tools, set
             return _result("error", f"PLANNER_UNAVAILABLE: {exc}", model, budget)
 
     change_words = "; ".join(
-        f"your {label(tasks[e['task_id']])} {FIELD_WORDS[e['field']]} from {e['old_time']} to {e['new_time']}"
+        f"the {FIELD_WORDS[e['field']]} for your {label(tasks[e['task_id']])} from {e['old_time']} to {e['new_time']}"
         for e in edits
     )
     if reasons:
