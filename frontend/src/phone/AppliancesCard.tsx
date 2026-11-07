@@ -39,8 +39,18 @@ export function AppliancesCard({ homeId, api, state, busy, onChanged }: {
   }, [api, haveCatalog, state.revision])
 
   const own = state.tasks.filter((t) => t.home_id === homeId)
+  // One of each per home (the backend enforces it too): owned appliances are matched by name.
+  const owned = new Set(own.map((t) => t.name.toLowerCase()))
+  const has = (name: string) => owned.has(name.toLowerCase())
   const spec = catalog?.schedulable.find((a) => a.kind === kind) ?? null
-  const full = catalog ? own.length >= catalog.max_per_home : false
+  const nothingLeft = catalog ? catalog.schedulable.every((a) => has(a.name)) : false
+  const full = catalog ? own.length >= catalog.max_per_home || nothingLeft : false
+
+  // If the chosen appliance became owned (added from another tab, or a slow double tap), clear the choice.
+  useEffect(() => {
+    if (spec && has(spec.name)) setKind('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec?.name, own.length])
   const planning = state.job_status === 'running'
   const disabled = busy || planning || working !== null || api.mode === 'sample'
 
@@ -140,8 +150,8 @@ export function AppliancesCard({ homeId, api, state, busy, onChanged }: {
             <select className="ps-input" value={kind} onChange={(e) => pick(e.target.value)}>
               <option value="">Choose…</option>
               {catalog.schedulable.map((a) => (
-                <option key={a.kind} value={a.kind}>
-                  {a.name} ({a.power_kw} kW, {hours(a.duration_slots)})
+                <option key={a.kind} value={a.kind} disabled={has(a.name)}>
+                  {a.name} {has(a.name) ? '(already added)' : `(${a.power_kw} kW, ${hours(a.duration_slots)})`}
                 </option>
               ))}
             </select>
@@ -172,7 +182,11 @@ export function AppliancesCard({ homeId, api, state, busy, onChanged }: {
       )}
 
       {planning && <p className="ps-muted ps-small-text">Planning is running. You can change appliances when it finishes.</p>}
-      {full && <p className="ps-muted ps-small-text">Up to {catalog?.max_per_home} appliances per home.</p>}
+      {full && (
+        <p className="ps-muted ps-small-text">
+          {nothingLeft ? 'Your home already has every appliance on the list.' : `Up to ${catalog?.max_per_home} appliances per home.`}
+        </p>
+      )}
       {error && <p className="ps-error" role="alert">{error}</p>}
     </section>
   )

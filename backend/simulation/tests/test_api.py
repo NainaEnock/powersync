@@ -438,7 +438,7 @@ def test_residents_add_and_remove_appliances(monkeypatch):
         assert s["metrics"]["coordinated"]["tasks_completed"] == 7
 
         assert c.post("/api/appliances", json={"home_id": "B", "action": "remove", "task_id": "a_washer"}).status_code == 403
-        assert c.post("/api/appliances", json={"home_id": "A", "action": "add", "kind": "ev", "deadline_slot": 4}).status_code == 400
+        assert c.post("/api/appliances", json={"home_id": "A", "action": "add", "kind": "water_heater", "deadline_slot": 4}).status_code == 400
         assert c.post("/api/appliances", json={"home_id": "A", "action": "add", "kind": "microwave"}).status_code == 400
         assert c.post("/api/appliances", json={"home_id": "A", "action": "remove", "task_id": "a_washer"}).status_code == 200
         assert not any(t["id"] == "a_washer" for t in c.get("/api/state").json()["tasks"])
@@ -473,3 +473,35 @@ def test_stub_reader_finds_added_appliances(client):
     r = client.post("/api/appliances", json={"home_id": "A", "action": "remove", "task_id": "a_ev"})
     assert r.status_code == 200
     assert any("removed the car charging" in e["text"] for e in client.get("/api/state?home=A").json()["events"])
+
+
+def test_appliance_edge_cases(monkeypatch):
+    with make_client(monkeypatch) as c:
+        add = lambda home, kind, dl=None: c.post("/api/appliances", json={
+            "home_id": home, "action": "add", "kind": kind, **({} if dl is None else {"deadline_slot": dl})})
+
+        # One of each per home, including the scenario's own appliances.
+        assert add("B", "dryer").json()["error"]["code"] == "ALREADY_ADDED"
+        assert add("A", "ev").json()["error"]["code"] == "ALREADY_ADDED"
+        assert add("A", "washer").status_code == 200
+        r = add("A", "washer")  # a double tap
+        assert r.status_code == 409 and r.json()["error"]["code"] == "ALREADY_ADDED"
+        assert "already has a washing machine" in r.json()["error"]["message"]
+        assert sum(t["id"].startswith("a_washer") for t in c.get("/api/state").json()["tasks"]) == 1
+        assert add("B", "washer").status_code == 200  # another home may have its own
+
+        # The street can't fit three 4.5 kW water heaters all done by 7:30 PM on top of everything else.
+        assert add("A", "water_heater", 6).status_code == 200
+        assert add("B", "water_heater", 6).status_code == 200
+        rev = c.get("/api/state").json()["revision"]
+        r = add("C", "water_heater", 6)
+        assert r.status_code == 409 and r.json()["error"]["code"] == "WONT_FIT"
+        assert "Try a later finish time" in r.json()["error"]["message"]
+        s = c.get("/api/state").json()
+        assert s["revision"] == rev and not any(t["id"] == "c_water_heater" for t in s["tasks"])  # nothing changed
+        assert add("C", "water_heater", 48).status_code == 200  # a later finish fits
+
+        # Remove, then add again with a new time: allowed, and it's a fresh appliance.
+        assert c.post("/api/appliances", json={"home_id": "A", "action": "remove", "task_id": "a_washer"}).status_code == 200
+        assert add("A", "washer", 12).status_code == 200
+        assert next(t for t in c.get("/api/state").json()["tasks"] if t["id"] == "a_washer")["deadline_slot"] == 12

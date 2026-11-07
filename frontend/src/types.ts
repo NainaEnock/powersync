@@ -210,6 +210,8 @@ export type ErrorCode =
   | 'JOB_RUNNING'
   | 'PAYLOAD_TOO_LARGE'
   | 'RATE_LIMITED'
+  | 'ALREADY_ADDED'
+  | 'WONT_FIT'
   // Client-side codes, never sent by the server:
   | 'BACKEND_DOWN'
   | 'NETWORK'
