@@ -455,3 +455,21 @@ def test_appliance_changes_need_the_home_code(monkeypatch):
         assert c.post("/api/appliances", json=body).status_code == 401
         assert c.post("/api/appliances", json=body, headers=H("t2")).status_code == 403
         assert c.post("/api/appliances", json=body, headers=H("t1")).status_code == 200
+
+
+def test_stub_reader_finds_added_appliances(client):
+    client.post("/api/appliances", json={"home_id": "A", "action": "add", "kind": "water_heater"})
+    client.post("/api/appliances", json={"home_id": "B", "action": "add", "kind": "washer"})
+    for home, text, want in [("A", "Hot water by 5 am please", "a_water_heater"),
+                             ("A", "Dishes done by 10 pm", "a_dish"),
+                             ("B", "Washing machine done by 10 pm", "b_washer"),
+                             ("B", "Dryer by 10 pm", "b_dryer")]:
+        j = wait_job(client, send(client, home, text, f"w-{home}-{want}")["job_id"])
+        pc = client.get(f"/api/state?home={home}").json()["pending_changes"]
+        assert j["result"]["outcome"] == "proposed_change", (text, j)
+        assert pc[0]["proposed_edits"]["edits"][0]["task_id"] == want
+        client.post("/api/action", json={"home_id": home, "action": "reject_change", "pending_change_id": pc[0]["id"],
+                                         "request_id": f"rj-{want}"})
+    r = client.post("/api/appliances", json={"home_id": "A", "action": "remove", "task_id": "a_ev"})
+    assert r.status_code == 200
+    assert any("removed the car charging" in e["text"] for e in client.get("/api/state?home=A").json()["events"])
