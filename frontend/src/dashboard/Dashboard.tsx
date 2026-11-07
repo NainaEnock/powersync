@@ -197,7 +197,7 @@ export function Dashboard({ api }: { api: Api }) {
         <div className="dash-view">
           {s && (
             <>
-              <MetricTiles state={s} />
+              <MetricTiles state={s} focus={focus} />
               <DemandChart
                 state={s}
                 focus={focus}
@@ -206,7 +206,7 @@ export function Dashboard({ api }: { api: Api }) {
                 tariffBusy={pending === 'tariff' || running || api.mode === 'sample'}
               />
               <Timeline state={s} focus={focus} />
-              <HomeCards state={s} />
+              <HomeCards state={s} focus={focus} />
             </>
           )}
         </div>
