@@ -2,15 +2,24 @@
    Every class is prefixed ps- so it can't collide with the dashboard. */
 
 .ps-phone {
+  /* Shared theme from B's index.css; only the home color is phone-specific. */
   --ps-home: #2563eb;
-  --ps-bg: #f4f6fb;
-  --ps-card: #ffffff;
-  --ps-text: #111827;
-  --ps-muted: #6b7280;
-  --ps-line: #e5e7eb;
-  --ps-ok: #047857;
-  --ps-bad: #b91c1c;
-  --ps-warn: #b45309;
+  --ps-bg: var(--bg, #f3f4ef);
+  --ps-card: var(--card, #ffffff);
+  --ps-card-2: var(--card-2, #f7f8f4);
+  --ps-text: var(--fg, #1f2a24);
+  --ps-text-2: var(--fg-2, #4b5650);
+  --ps-muted: var(--muted, #7a847d);
+  --ps-line: var(--border, #e3e6dd);
+  --ps-ok: var(--ok-fg, #276540);
+  --ps-ok-bg: var(--ok-bg, #e4f1e6);
+  --ps-bad: var(--bad-fg, #9f2f22);
+  --ps-bad-bg: var(--bad-bg, #fbe5e1);
+  --ps-warn: var(--warn-fg, #8a5a12);
+  --ps-warn-bg: var(--warn-bg, #fbf0d9);
+  --ps-brand: var(--brand, #2f5d46);
+  --ps-brand-soft: var(--brand-soft, #e3eedc);
+  --ps-shadow: 0 1px 2px rgba(31, 42, 36, 0.04);
   box-sizing: border-box;
   max-width: 480px;
   min-height: 100vh;
@@ -51,10 +60,11 @@
 /* header */
 .ps-header {
   background: var(--ps-card);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 12px;
   border-top: 5px solid var(--ps-home);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: 1px solid var(--ps-line);
+  box-shadow: var(--ps-shadow);
 }
 .ps-header-top {
   display: flex;
@@ -88,8 +98,8 @@
   font-size: 0.75rem;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #eef2f7;
-  color: #374151;
+  background: var(--ps-card-2);
+  color: var(--ps-text-2);
   font-weight: 600;
 }
 .ps-badge-live {
@@ -97,24 +107,25 @@
   color: #1e40af;
 }
 .ps-badge-sample {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--ps-warn-bg);
+  color: var(--ps-warn);
 }
 .ps-badge-ok {
-  background: #d1fae5;
+  background: var(--ps-ok-bg);
   color: var(--ps-ok);
 }
 .ps-badge-bad {
-  background: #fee2e2;
+  background: var(--ps-bad-bg);
   color: var(--ps-bad);
 }
 
 /* cards */
 .ps-card {
   background: var(--ps-card);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 14px;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: 1px solid var(--ps-line);
+  box-shadow: var(--ps-shadow);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -162,7 +173,7 @@
   font-size: 0.95rem;
 }
 .ps-banner-error {
-  background: #fee2e2;
+  background: var(--ps-bad-bg);
   color: var(--ps-bad);
 }
 .ps-activity {
@@ -171,8 +182,8 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: 12px;
-  background: #e0e7ff;
-  color: #3730a3;
+  background: var(--ps-brand-soft);
+  color: var(--ps-brand);
   font-size: 0.9rem;
 }
 
@@ -189,7 +200,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  border: 1px solid var(--ps-line);
+  box-shadow: var(--ps-shadow);
 }
 .ps-tile-label {
   font-size: 0.78rem;
@@ -198,8 +210,10 @@
   letter-spacing: 0.03em;
 }
 .ps-tile-value {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 .ps-tile-hint {
   font-size: 0.72rem;
@@ -266,11 +280,11 @@
   white-space: nowrap;
 }
 .ps-ok {
-  background: #d1fae5;
+  background: var(--ps-ok-bg);
   color: var(--ps-ok);
 }
 .ps-bad {
-  background: #fee2e2;
+  background: var(--ps-bad-bg);
   color: var(--ps-bad);
 }
 .ps-pill {
@@ -281,8 +295,8 @@
   font-weight: 700;
   padding: 2px 7px;
   border-radius: 999px;
-  background: #eef2f7;
-  color: #374151;
+  background: var(--ps-card-2);
+  color: var(--ps-text-2);
 }
 .ps-pill svg {
   width: 12px;
@@ -298,7 +312,7 @@
   font-weight: 700;
 }
 .ps-infeasible {
-  border: 2px solid #fca5a5;
+  border: 2px solid var(--ps-bad-bg);
 }
 .ps-infeasible h2 {
   color: var(--ps-bad);
@@ -310,8 +324,8 @@
 
 /* status card */
 .ps-status-card {
-  background: #eef2ff;
-  color: #312e81;
+  background: var(--ps-brand-soft);
+  color: var(--ps-brand);
   border-radius: 12px;
   padding: 10px 12px;
   display: flex;
@@ -328,11 +342,11 @@
   flex: 1;
 }
 .ps-status-bad {
-  background: #fee2e2;
+  background: var(--ps-bad-bg);
   color: var(--ps-bad);
 }
 .ps-status-good {
-  background: #d1fae5;
+  background: var(--ps-ok-bg);
   color: var(--ps-ok);
 }
 
@@ -349,7 +363,7 @@
   padding: 0 16px;
   border-radius: 12px;
   border: 1px solid var(--ps-line);
-  background: #fff;
+  background: var(--ps-card);
   color: var(--ps-text);
   font: inherit;
   font-weight: 600;
@@ -395,7 +409,7 @@
   padding: 12px;
   border-radius: 12px;
   border: 1px solid var(--ps-line);
-  background: #fff;
+  background: var(--ps-card);
   color: var(--ps-text);
   resize: none;
 }
@@ -421,8 +435,8 @@
   padding: 8px 10px;
   border-radius: 10px;
   border: 1px dashed var(--ps-line);
-  background: #f9fafb;
-  color: #374151;
+  background: var(--ps-card-2);
+  color: var(--ps-text-2);
   cursor: pointer;
   min-height: 40px;
 }
@@ -463,7 +477,7 @@
   gap: 8px;
 }
 .ps-msg {
-  background: #f3f4f6;
+  background: var(--ps-card-2);
   border-radius: 12px;
   padding: 8px 10px;
   max-width: 92%;
@@ -474,10 +488,10 @@
   background: color-mix(in srgb, var(--ps-home) 14%, white);
 }
 .ps-msg-commit {
-  background: #ecfdf5;
+  background: var(--ps-ok-bg);
 }
 .ps-msg-error {
-  background: #fef2f2;
+  background: var(--ps-bad-bg);
   color: var(--ps-bad);
 }
 .ps-msg-meta {
@@ -490,7 +504,7 @@
 }
 .ps-msg-from {
   font-weight: 700;
-  color: #374151;
+  color: var(--ps-text-2);
 }
 .ps-msg-src {
   margin-left: auto;
@@ -513,19 +527,12 @@
 }
 
 .ps-banner-sample {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--ps-warn-bg);
+  color: var(--ps-warn);
 }
 .ps-header .status-badge {
   margin-top: 8px;
 }
 .ps-nowrap {
-  white-space: nowrap;
-}
-/* B's status pills: never wider than the header on small phones. */
-.ps-header .pill {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }

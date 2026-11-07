@@ -632,8 +632,8 @@ function senderLabel(sender: string, homeId: HomeId): string {
   const [role, home] = sender.split('_');
   if (role === 'resident') return home === homeId ? 'You' : `Home ${home}`;
   if (role === 'agent') return home === homeId ? 'Your agent' : `Home ${home}'s agent`;
-  if (sender === 'coordinator') return 'Neighborhood coordinator';
-  if (sender === 'validator') return 'Plan check';
+  if (sender === 'coordinator') return 'Neighborhood Coordinator';
+  if (sender === 'validator') return 'Safety check';
   if (sender === 'backend') return 'PowerSync';
   return sender;
 }
@@ -664,9 +664,12 @@ function MessageItem({ ev, homeId }: { ev: AgentEvent; homeId: HomeId }) {
       <div className="ps-msg-meta">
         <span className="ps-msg-from">{senderLabel(ev.sender, homeId)}</span>
         {ev.proposal_id && <span className="ps-pill">Plan {ev.proposal_id.replace(/^P-/, '')}</span>}
-        <span className="ps-msg-src" title={ev.source === 'model' ? 'Written by AI' : 'Written by PowerSync'}>
-          {ev.source === 'model' ? 'AI' : 'auto'}
-        </span>
+        {/* The resident's own words need no "who wrote this" marker. */}
+        {!mine && (
+          <span className="ps-msg-src" title={ev.source === 'model' ? 'Written by the AI model' : 'Written by code'}>
+            {ev.source === 'model' ? 'AI' : 'code'}
+          </span>
+        )}
       </div>
       <div className="ps-msg-text">{ev.text}</div>
     </li>
