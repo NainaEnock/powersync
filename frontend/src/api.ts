@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { SAMPLE_STATE, sampleHomeState } from './fixtures'
 import type {
+  ApplianceCatalog,
   ErrorCode,
   Health,
   HomeId,
@@ -139,6 +140,9 @@ export interface Api {
   setTariff(mode: TariffMode): Promise<{ revision: number; tariff_mode: TariffMode }>
   reset(): Promise<unknown>
   job(id: string, signal?: AbortSignal): Promise<Job>
+  applianceCatalog(): Promise<ApplianceCatalog>
+  addAppliance(home: HomeId, kind: string, deadlineSlot?: number): Promise<{ revision: number; task_id: string }>
+  removeAppliance(home: HomeId, taskId: string): Promise<{ revision: number; task_id: string }>
 }
 
 const SAMPLE_REJECT = () =>
@@ -159,6 +163,9 @@ export function createApi(mode: DataMode = getDataMode()): Api {
       setTariff: SAMPLE_REJECT,
       reset: SAMPLE_REJECT,
       job: SAMPLE_REJECT,
+      applianceCatalog: () => request<ApplianceCatalog>('/api/appliances/catalog'),
+      addAppliance: SAMPLE_REJECT,
+      removeAppliance: SAMPLE_REJECT,
     }
   }
 
@@ -186,6 +193,15 @@ export function createApi(mode: DataMode = getDataMode()): Api {
       request('/api/tariff', { method: 'POST', token: admin(), body: { tariff_mode } }),
     reset: () => request('/api/reset', { method: 'POST', token: admin(), body: {} }),
     job: (id, signal) => request<Job>(`/api/jobs/${encodeURIComponent(id)}`, { signal }),
+    applianceCatalog: () => request<ApplianceCatalog>('/api/appliances/catalog'),
+    addAppliance: (home, kind, deadline_slot) =>
+      request('/api/appliances', {
+        method: 'POST',
+        token: homeTok(home),
+        body: { home_id: home, action: 'add', kind, ...(deadline_slot === undefined ? {} : { deadline_slot }) },
+      }),
+    removeAppliance: (home, task_id) =>
+      request('/api/appliances', { method: 'POST', token: homeTok(home), body: { home_id: home, action: 'remove', task_id } }),
   }
 }
 

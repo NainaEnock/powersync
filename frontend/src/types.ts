@@ -214,3 +214,21 @@ export type ErrorCode =
   | 'BACKEND_DOWN'
   | 'NETWORK'
   | 'UNKNOWN'
+
+// Appliances residents can add from their phone (GET /api/appliances/catalog).
+export interface ApplianceSpec {
+  kind: string
+  name: string
+  label: string
+  power_kw: number
+  duration_slots: number
+  deadline_slot: number
+  preferred_start_slot: number
+  note: string
+}
+
+export interface ApplianceCatalog {
+  schedulable: ApplianceSpec[]
+  not_schedulable: { name: string; why: string }[]
+  max_per_home: number
+}

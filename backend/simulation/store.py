@@ -22,6 +22,7 @@ from .engine import (
     canonical_schedule, cheap_timer_schedule, compute_metrics, find_feasible_schedule,
     load_by_slot, preferred_schedule, validate_schedule, window_problem,
 )
+from .appliances import CATALOG, MAX_APPLIANCES_PER_HOME
 from .scenario import build_snapshot, load_raw, scenario_tasks
 from .schema import (
     EDITABLE_FIELDS, AgentEvent, Job, PendingChange, ProposedEdit, ProposedEdits, ScheduleEntry,
@@ -525,6 +526,67 @@ class Store:
                 continue
             if any(getattr(current[e.task_id], e.field) != e.old_value for e in p.proposed_edits.edits):
                 p.status = "stale"
+
+    # ------------------------------------------------------------ appliances (residents add / remove)
+
+    def _appliances_changed(self, home_id: str, own_text: str, verb: str) -> None:
+        """Requirements changed: the committed plan no longer covers every appliance, so drop it and say so."""
+        self.requirements_version += 1
+        self.revision += 1
+        self.coordinated = None
+        self.coordination = {
+            "status": "not_run", "explanation": None,
+            "reasons": ["Appliances changed. Coordinate again to plan the new set."],
+            "job_id": None, "source": None, "proposal_id": None, "plan_name": None,
+            "tariff_mode": None, "home_explanations": {},
+        }
+        self._recompute()
+        name = home_name(self.snapshot(), home_id)
+        other = f"{name} {verb} an appliance. The street will replan on the next coordination."
+        self.emit_system(None, sender="backend", recipient="all_agents", type="info",
+                         text=f"{name} {own_text[4:] if own_text.startswith('You ') else own_text}",
+                         home_views={h: (own_text if h == home_id else other) for h in ("A", "B", "C")})
+
+    def add_appliance(self, home_id: str, kind: str, deadline_slot: Optional[int]) -> Task:
+        spec = CATALOG.get(kind)
+        if spec is None:
+            raise StoreError(400, "BAD_REQUEST", f"Unknown appliance '{kind}'. Choose one from the list.")
+        own = [t for t in self.tasks if t.home_id == home_id]
+        if len(own) >= MAX_APPLIANCES_PER_HOME:
+            raise StoreError(400, "BAD_REQUEST", f"A home can schedule up to {MAX_APPLIANCES_PER_HOME} appliances.")
+        dur = spec["duration_slots"]
+        deadline = spec["deadline_slot"] if deadline_slot is None else deadline_slot
+        if deadline < dur or deadline > 96:
+            raise StoreError(400, "BAD_REQUEST",
+                             f"{spec['name']} takes {dur * 15 // 60} h {dur * 15 % 60} min, so it can't finish by "
+                             f"{slot_to_time(deadline)} when planning starts at 6:00 PM.".replace(" 0 min", ""))
+        base = f"{home_id.lower()}_{kind}"
+        ids = {t.id for t in self.tasks}
+        tid, n = base, 2
+        while tid in ids:
+            tid, n = f"{base}{n}", n + 1
+        pref = max(0, min(spec["preferred_start_slot"], deadline - dur))
+        task = Task(id=tid, home_id=home_id, name=spec["name"], power_kw=spec["power_kw"], duration_slots=dur,
+                    earliest_slot=0, deadline_slot=deadline, preferred_start_slot=pref, interruptible=False)
+        self.tasks = [*self.tasks, task]
+        self._appliances_changed(
+            home_id, f"You added {spec['label']} ({spec['power_kw']:g} kW, done by {slot_to_time(deadline)}).",
+            "added")
+        return task
+
+    def remove_appliance(self, home_id: str, task_id: str) -> None:
+        task = next((t for t in self.tasks if t.id == task_id), None)
+        if task is None:
+            raise StoreError(404, "NOT_FOUND", "That appliance wasn't found. The demo may have been reset.")
+        if task.home_id != home_id:
+            raise StoreError(403, "FORBIDDEN", "That appliance belongs to another home.")
+        if sum(1 for t in self.tasks if t.home_id == home_id) <= 1:
+            raise StoreError(400, "BAD_REQUEST", "Keep at least one appliance in your home's plan.")
+        self.tasks = [t for t in self.tasks if t.id != task_id]
+        for p in self.pending.values():  # a waiting change to the removed appliance can't apply anymore
+            if p.status == "pending" and any(e.task_id == task_id for e in p.proposed_edits.edits):
+                p.status = "stale"
+        self._appliances_changed(home_id, f"You removed the {task.name.lower()}.", "removed")
 
     # ------------------------------------------------------------ tariff & reset
 

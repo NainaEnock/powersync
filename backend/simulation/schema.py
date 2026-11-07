@@ -165,6 +165,16 @@ class ActionBody(BaseModel):
     expected_revision: Optional[int] = None
 
 
+class ApplianceBody(BaseModel):
+    """Add an appliance from the catalog, or remove one of the home's own appliances."""
+    model_config = ConfigDict(extra="forbid")
+    home_id: str
+    action: Literal["add", "remove"]
+    kind: Optional[str] = Field(default=None, max_length=32)            # add
+    deadline_slot: Optional[int] = Field(default=None, ge=1, le=96)     # add (optional; catalog default)
+    task_id: Optional[str] = Field(default=None, max_length=64)         # remove
+
+
 class TariffBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tariff_mode: TariffMode

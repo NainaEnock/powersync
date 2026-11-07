@@ -26,7 +26,8 @@ load_dotenv(ROOT / ".env")
 
 from .simulation.agent_seam import load_agents  # noqa: E402
 from .simulation.scenario import load_raw  # noqa: E402
-from .simulation.schema import HOME_IDS, ActionBody, MessageBody, TariffBody  # noqa: E402
+from .simulation.appliances import catalog_view  # noqa: E402
+from .simulation.schema import HOME_IDS, ActionBody, ApplianceBody, MessageBody, TariffBody  # noqa: E402
 from .simulation.store import Store, StoreError  # noqa: E402
 
 VERSION = "0.2.0"
@@ -235,6 +236,28 @@ def create_app() -> FastAPI:
             raise StoreError(409, "JOB_RUNNING", "Planning is running. Try again in a moment.")
         s.set_tariff(body.tariff_mode)
         return {"revision": s.revision, "tariff_mode": s.tariff_mode}
+
+    @app.get("/api/appliances/catalog")
+    async def appliance_catalog():
+        return catalog_view()
+
+    @app.post("/api/appliances")
+    async def appliances(request: Request, body: ApplianceBody):
+        """A resident adds a catalog appliance to their own home, or removes one of their own."""
+        s = store()
+        require_home(request, body.home_id)
+        rate_limit(f"home-{body.home_id}")
+        if s.mutation_job_id or s.active_jobs():
+            raise StoreError(409, "JOB_RUNNING", "Planning is running. Try again in a moment.")
+        if body.action == "add":
+            if not body.kind:
+                raise StoreError(400, "BAD_REQUEST", "Pick an appliance to add.")
+            task = s.add_appliance(body.home_id, body.kind, body.deadline_slot)
+            return {"revision": s.revision, "task_id": task.id}
+        if not body.task_id:
+            raise StoreError(400, "BAD_REQUEST", "Pick an appliance to remove.")
+        s.remove_appliance(body.home_id, body.task_id)
+        return {"revision": s.revision, "task_id": body.task_id}
 
     @app.get("/api/jobs/{job_id}")
     async def job(job_id: str):

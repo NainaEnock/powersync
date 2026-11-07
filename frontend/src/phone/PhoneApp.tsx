@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   AlertTriangle,
+  AirVent,
   BatteryCharging,
   Car,
   Check,
@@ -20,6 +21,9 @@ import {
   Send,
   Shirt,
   Utensils,
+  WashingMachine,
+  Waves,
+  Flame,
   WifiOff,
   X,
   Zap,
@@ -38,6 +42,7 @@ import {
 } from '../types';
 import { applianceNoun, editFieldPhrase, formatKwh, formatUsd } from './format';
 import { errorText, usePhoneFlow, type FlowState } from './usePhoneFlow';
+import { AppliancesCard } from './AppliancesCard';
 import './phone.css';
 
 const SUGGESTIONS: Record<HomeId, string[]> = {
@@ -225,6 +230,7 @@ function PhoneHome({
           )}
           <SummaryTiles homeId={homeId} state={state} />
           <PlanCard homeId={homeId} state={state} replanning={busy && flow.kind === 'action'} />
+          <AppliancesCard homeId={homeId} api={api} state={state} busy={busy} onChanged={polled.refresh} />
           <ChangeCards homeId={homeId} state={state} busy={busy} onAct={act} />
           <FlowStatus
             flow={flow}
@@ -366,6 +372,11 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
 /* ---------------- today's plan ---------------- */
 
 function TaskIcon({ name }: { name: string }) {
+  const low = name.toLowerCase();
+  if (low.includes('washing')) return <WashingMachine aria-hidden />;
+  if (low.includes('water heater')) return <Flame aria-hidden />;
+  if (low.includes('air conditioning')) return <AirVent aria-hidden />;
+  if (low.includes('pool')) return <Waves aria-hidden />;
   const n = applianceNoun(name);
   if (n === 'car') return <Car aria-hidden />;
   if (n === 'dryer') return <Shirt aria-hidden />;
