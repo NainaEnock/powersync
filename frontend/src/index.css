@@ -18,7 +18,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .status-badge { display: flex; gap: 6px; flex-wrap: wrap; }
 .pill {
   display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px;
-  font-size: 13px; background: #1e293b; border: 1px solid var(--border);
+  font-size: 13px; background: #1e293b; color: #e2e8f0; border: 1px solid var(--border);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pill-ok { background: var(--ok-bg); color: var(--ok-fg); }
 .pill-warn { background: var(--warn-bg); color: var(--warn-fg); }
