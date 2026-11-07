@@ -24,6 +24,9 @@ export function Timeline({ state, focus }: { state: NeighborhoodState; focus: Sc
   // Remember each task's first deadline in this demo run, so a changed one can say what it was.
   const firstDeadline = useRef<{ gen: number; map: Map<string, number> }>({ gen: -1, map: new Map() })
   if (firstDeadline.current.gen !== state.generation) firstDeadline.current = { gen: state.generation, map: new Map() }
+  // Forget removed appliances, so one removed and added again with a new time isn't shown as "changed".
+  const present = new Set(state.tasks.map((t) => t.id))
+  for (const id of [...firstDeadline.current.map.keys()]) if (!present.has(id)) firstDeadline.current.map.delete(id)
   for (const t of state.tasks) if (!firstDeadline.current.map.has(t.id)) firstDeadline.current.map.set(t.id, t.deadline_slot)
 
   // A resident's requested deadline that isn't confirmed yet (dashboard view carries pending changes).

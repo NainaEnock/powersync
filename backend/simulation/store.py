@@ -552,6 +552,11 @@ class Store:
         if spec is None:
             raise StoreError(400, "BAD_REQUEST", f"Unknown appliance '{kind}'. Choose one from the list.")
         own = [t for t in self.tasks if t.home_id == home_id]
+        # One of each per home. Matching by name covers the scenario's own appliances too (Home B's dryer),
+        # and a double tap on Add can't create a second copy.
+        if any(t.name.lower() == spec["name"].lower() for t in own):
+            raise StoreError(409, "ALREADY_ADDED",
+                             f"Your home already has {spec['label']}. To change when it's done, ask your agent.")
         if len(own) >= MAX_APPLIANCES_PER_HOME:
             raise StoreError(400, "BAD_REQUEST", f"A home can schedule up to {MAX_APPLIANCES_PER_HOME} appliances.")
         dur = spec["duration_slots"]
@@ -568,6 +573,14 @@ class Store:
         pref = max(0, min(spec["preferred_start_slot"], deadline - dur))
         task = Task(id=tid, home_id=home_id, name=spec["name"], power_kw=spec["power_kw"], duration_slots=dur,
                     earliest_slot=0, deadline_slot=deadline, preferred_start_slot=pref, interruptible=False)
+        # Refuse an appliance the street can't fit under its limit in time, before anything changes,
+        # rather than accepting it and failing at the next coordination.
+        plan = find_feasible_schedule(self.snapshot(tasks=[*self.tasks, task]))
+        if not plan.ok:
+            why = plan.reasons[0] if plan.reasons else "every appliance can't fit under the limit in time"
+            raise StoreError(409, "WONT_FIT",
+                             f"The street can't fit {spec['label']} done by {slot_to_time(deadline)}: {why} "
+                             "Try a later finish time.")
         self.tasks = [*self.tasks, task]
         self._appliances_changed(
             home_id, f"You added {spec['label']} ({spec['power_kw']:g} kW, done by {slot_to_time(deadline)}).",
