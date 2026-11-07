@@ -144,6 +144,11 @@ export function ConversationPanel({ state, paced, needsCode, size = 'side' }: {
       <div className="convo-list" ref={listRef}>
         {hidden ? (
           <div className="convo-empty"><Lock size={16} /> Conversation hidden. Enter the admin code to view.</div>
+        ) : paused && visible.length === 0 && newWhilePaused > 0 ? (
+          <div className="convo-empty">
+            Paused with {newWhilePaused} new messages waiting.
+            <button className="chip on" onClick={togglePause}><Play size={13} /> Resume</button>
+          </div>
         ) : visible.length === 0 && !typing ? (
           <div className="convo-empty muted">No messages yet. Press Coordinate neighborhood to start.</div>
         ) : (

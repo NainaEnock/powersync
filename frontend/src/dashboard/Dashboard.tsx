@@ -1,4 +1,4 @@
-import { ArrowUpRight, ExternalLink, LayoutDashboard, Loader2, MessagesSquare, RotateCcw, Smartphone, Waves, Zap } from 'lucide-react'
+import { ArrowUpRight, CalendarClock, ExternalLink, LayoutDashboard, Loader2, MessagesSquare, RotateCcw, Smartphone, Waves, Zap } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, useHealth, useJobState, usePoll, type Api } from '../api'
 import { StatusBadge } from '../StatusBadge'
@@ -12,8 +12,11 @@ import { Timeline } from './Timeline'
 import { usePacedEvents } from './usePacedEvents'
 import './dashboard.css'
 
-type View = 'overview' | 'chat'
-const viewFromUrl = (): View => (new URLSearchParams(window.location.search).get('view') === 'chat' ? 'chat' : 'overview')
+type View = 'overview' | 'schedule' | 'chat'
+const viewFromUrl = (): View => {
+  const v = new URLSearchParams(window.location.search).get('view')
+  return v === 'chat' || v === 'schedule' ? v : 'overview'
+}
 
 const FRIENDLY: Partial<Record<ErrorCode, string>> = {
   JOB_RUNNING: 'Planning is running. Try again in a moment.',
@@ -56,7 +59,7 @@ export function Dashboard({ api }: { api: Api }) {
   const setView = (v: View) => {
     setViewState(v)
     const url = new URL(window.location.href)
-    if (v === 'chat') url.searchParams.set('view', 'chat')
+    if (v !== 'overview') url.searchParams.set('view', v)
     else url.searchParams.delete('view')
     window.history.replaceState(null, '', url.toString())
   }
@@ -179,6 +182,9 @@ export function Dashboard({ api }: { api: Api }) {
         <button role="tab" aria-selected={view === 'overview'} className={view === 'overview' ? 'on' : ''} onClick={() => setView('overview')}>
           <LayoutDashboard size={15} /> Overview
         </button>
+        <button role="tab" aria-selected={view === 'schedule'} className={view === 'schedule' ? 'on' : ''} onClick={() => setView('schedule')}>
+          <CalendarClock size={15} /> Schedule
+        </button>
         <button role="tab" aria-selected={view === 'chat'} className={view === 'chat' ? 'on' : ''} onClick={() => setView('chat')}>
           <MessagesSquare size={15} /> Conversation
           {paced.shown.length > 0 && <span className="tab-count">{paced.shown.length}</span>}
@@ -189,25 +195,33 @@ export function Dashboard({ api }: { api: Api }) {
         </a>
       </nav>
 
-      {view === 'overview' ? (
-        <div className="dash-main">
-          <div className="dash-left">
-            {s && (
-              <>
-                <MetricTiles state={s} />
-                <DemandChart
-                  state={s}
-                  onFlatChange={setFlat}
-                  tariffBusy={pending === 'tariff' || running || api.mode === 'sample'}
-                />
-                <Timeline state={s} />
-                <HomeCards state={s} />
-              </>
-            )}
-          </div>
-          <ConversationPanel state={s} paced={paced} needsCode={needsCode} />
+      {view === 'overview' && (
+        <div className="dash-view">
+          {s && (
+            <>
+              <MetricTiles state={s} />
+              <DemandChart
+                state={s}
+                onFlatChange={setFlat}
+                tariffBusy={pending === 'tariff' || running || api.mode === 'sample'}
+              />
+              <HomeCards state={s} />
+            </>
+          )}
         </div>
-      ) : (
+      )}
+      {view === 'schedule' && (
+        <div className="dash-view">
+          {s && (
+            <>
+              <MetricTiles state={s} />
+              <Timeline state={s} />
+              <HomeCards state={s} />
+            </>
+          )}
+        </div>
+      )}
+      {view === 'chat' && (
         <div className="dash-chat">
           <ConversationPanel state={s} paced={paced} needsCode={needsCode} size="full" />
           {s && <PlanSummary state={s} />}

@@ -9,6 +9,8 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered from main.tsx on /phone only, so the dashboard is never served from a stale cache.
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'icons/apple-touch-icon.png'],
       manifest: {
         name: 'PowerSync',
@@ -28,7 +30,7 @@ export default defineConfig({
       workbox: {
         // Cache the app shell only. Never cache /api.
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/dashboard/],
         runtimeCaching: [],
       },
     }),
