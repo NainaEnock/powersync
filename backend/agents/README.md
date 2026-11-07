@@ -5,7 +5,7 @@ Proposed C↔D seam for `docs/contract.md` (D owns that file; copy what you agre
 ## Entry points (D calls these)
 
 ```python
-from backend.agents import interpret_request, coordinate_neighborhood, announce_commit, get_energy_tools
+from backend.agents import interpret_request, coordinate_neighborhood, get_energy_tools
 
 await get_energy_tools().start()          # optional, at app startup (lazy otherwise)
 await get_energy_tools().close()          # at shutdown
@@ -27,6 +27,7 @@ Pass no `model` in production: the live OpenRouter client is used if `OPENROUTER
 
 A subset of `NeighborhoodState` with the same field names:
 `scenario_id, generation, requirements_version, revision, horizon_start, slot_minutes, capacity_kw, tariff_mode, tariff_label, tariff_usd_per_kwh[96], homes[], tasks[], background_kw_by_home {A: [96] or number}, baseline_schedule` (preferred times).
+Optional, read when present: `next_plan_number` (default 1) and `previous_schedule` (the committed plan; a replan is compared with "the current plan" instead of preferred times).
 It must be JSON-serializable, because it is sent to the MCP subprocess.
 
 ## emit

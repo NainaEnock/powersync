@@ -116,6 +116,10 @@ class _Negotiation:
         self.rounds = 0
         self.tried: set[str] = set()
         self.notes: list[str] = []
+        # D passes these on the snapshot (contract §6): plan numbers continue across the night,
+        # and a replan is compared with the plan that's in force now.
+        self.first_n = max(1, int(snap.get("next_plan_number") or 1))
+        self.previous = snap.get("previous_schedule") or None
 
     # ----------------------------------------------------------------- run
 
@@ -124,11 +128,11 @@ class _Negotiation:
         if not is_change(self.trigger):  # D already announced a confirmed change (contract §5)
             await self.em.send(sender="coordinator", recipient="all_agents", type="info", text=text, round=1,
                                home_views=views)
-        await self.em.stage("Building Plan 1")
+        await self.em.stage(f"Building {self._next_name()[1]}")
         try:
             plan1 = await self._first_plan()
         except (ToolUnavailable, BudgetExceeded) as exc:
-            msg = "The planner couldn't be reached, so the current plan stays in place."
+            msg = "The planner couldn't be reached. Using the safe plan."
             await self.em.send(sender="coordinator", recipient="all_agents", type="error", text=msg, round=1,
                                home_views={h: msg for h in self.homes})
             return self._result("error", f"PLANNER_UNAVAILABLE: {exc}", None)
@@ -136,7 +140,7 @@ class _Negotiation:
             return self._result("no_plan", self.notes[-1] if self.notes else "No plan fits every deadline.", None)
 
         if self.model is None:
-            msg = "The household agents are unavailable right now, so this uses the planner's safe Plan 1 without negotiation."
+            msg = f"The household agents are unavailable right now, so this uses the planner's safe {plan1.name} without negotiation."
             await self.em.send(sender="coordinator", recipient="all_agents", type="error", text=msg, round=1,
                                proposal_id=plan1.proposal_id, home_views={h: msg for h in self.homes})
             return self._result("plan_ready", msg, plan1, fallback=True)
@@ -164,7 +168,7 @@ class _Negotiation:
         all_failed = self.budget.model_successes == 0 and self.budget.model_failures > 0
         if all_failed:
             current = plan1
-            msg = "The household agents didn't answer in time, so the street uses the planner's safe Plan 1."
+            msg = f"The household agents didn't answer in time, so the street uses the planner's safe {plan1.name}."
             await self.em.send(sender="coordinator", recipient="all_agents", type="error", text=msg,
                                round=self.rounds, proposal_id=plan1.proposal_id, home_views={h: msg for h in self.homes})
             return self._result("plan_ready", msg, plan1, fallback=True)
@@ -191,9 +195,18 @@ class _Negotiation:
             for t in self.snap["tasks"]
         ]
 
+    def _next_name(self) -> tuple[str, str]:
+        n = self.first_n + len(self.plans)
+        return f"P-{n}", f"Plan {n}"
+
     async def _first_plan(self) -> Plan | None:
+        pid, name = self._next_name()
+        if self.previous:
+            before, before_name = self.previous, "the current plan"
+        else:
+            before, before_name = self._baseline(), "everyone's preferred times"
         res = await self.planner.call(
-            "find_feasible_schedule", {}, sender="coordinator", round=1, proposal_id="P-1",
+            "find_feasible_schedule", {}, sender="coordinator", round=1, proposal_id=pid,
             text=f"Asking the planner for a plan that keeps the street under {self.snap['capacity_kw']:g} kW with every deadline met.",
         )
         if not res.get("ok"):
@@ -204,15 +217,15 @@ class _Negotiation:
                                home_views={h: "No plan fits every deadline tonight. Your current plan stays." for h in self.homes})
             return None
         cmp = await self.planner.call(
-            "compare_schedules", {"baseline": self._baseline(), "candidate": res["schedule"]},
-            sender="coordinator", round=1, proposal_id="P-1",
-            text="Comparing Plan 1 with everyone's preferred times.",
+            "compare_schedules", {"baseline": before, "candidate": res["schedule"]},
+            sender="coordinator", round=1, proposal_id=pid,
+            text=f"Comparing {name} with {before_name}.",
         )
-        self.baseline_metrics = cmp["baseline_metrics"]
-        plan = Plan("P-1", "Plan 1", res["schedule"], cmp["candidate_metrics"], {})
+        self.baseline_metrics, self.baseline_name = cmp["baseline_metrics"], before_name
+        plan = Plan(pid, name, res["schedule"], cmp["candidate_metrics"], {})
         text, views = plan_announcement(
             self.snap, plan.proposal_id, plan.name, plan.schedule, plan.metrics,
-            previous=self._baseline(), previous_name="everyone's preferred times", previous_metrics=self.baseline_metrics,
+            previous=before, previous_name=before_name, previous_metrics=self.baseline_metrics,
         )
         plan.summary, plan.views = text, views
         self.plans.append(plan)
@@ -221,8 +234,7 @@ class _Negotiation:
         return plan
 
     async def _next_plan(self, current: Plan, pins: dict[str, int], rnd: int) -> Plan | None:
-        pid = f"P-{len(self.plans) + 1}"
-        name = f"Plan {len(self.plans) + 1}"
+        pid, name = self._next_name()
         res = await self.planner.call(
             "find_feasible_schedule", {"pins": pins}, sender="coordinator", round=rnd, proposal_id=pid,
             text=f"Asking the planner to build {name} with the agreed change.",
@@ -437,7 +449,7 @@ class _Negotiation:
                 await self._info(f"No change was agreed, so {current.name} stays.", rnd, current)
                 return None
             pins[a["task_id"]] = a["to_slot"]
-        await self.em.stage(f"Building Plan {len(self.plans) + 1}")
+        await self.em.stage(f"Building {self._next_name()[1]}")
         try:
             return await self._next_plan(current, pins, rnd)
         except (ToolUnavailable, BudgetExceeded) as exc:
@@ -498,10 +510,11 @@ class _Negotiation:
             source, ai_mode = "live", "live"
         ref = None
         if plan is not None:
-            if plan.proposal_id != "P-1" and self.plans:
+            if self.plans and plan.proposal_id != self.plans[0].proposal_id:
                 ref = {"name": self.plans[0].name, "metrics": self.plans[0].metrics}
             else:
-                ref = {"name": "everyone's preferred times", "metrics": getattr(self, "baseline_metrics", plan.metrics)}
+                ref = {"name": getattr(self, "baseline_name", "everyone's preferred times"),
+                       "metrics": getattr(self, "baseline_metrics", plan.metrics)}
         return {
             "outcome": outcome,
             "message": message,
