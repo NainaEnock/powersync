@@ -1,6 +1,6 @@
 # PowerSync contract (D owns; wins over the PRD where they differ)
 
-Status: **v1, implemented and tested** on `feat/backend-scheduler` (`python -m pytest backend -q`: 28 passed).
+Status: **v2**. Adds C's agent seam, B's G2 answers, and A's outcome names. Tests: `python -m pytest backend -q` → 31 passed.
 Field names follow PRD §10 exactly. Additions beyond the PRD are marked **ADDED**. To change anything here, post
 `field → change → affected owners → test to rerun` in Build status first.
 
@@ -11,7 +11,9 @@ Run: `source .venv/bin/activate && pip install -r backend/requirements.txt` then
 
 | Topic | Decision |
 |---|---|
-| §11.3 public-schedule gap | **Accept the gap.** `GET /api/state` without `home` returns every schedule and metric (the charts need it), but `events` and `pending_changes` are empty and `events_hidden: true` unless the admin token is sent. "The projector is the operator's screen." Phones always use `?home=`. |
+| §11.3 public-schedule gap | **Closed (B's call).** `GET /api/state` without `home` needs the admin token: none → `401`, a wrong one → `403`. In dev-open it's open. The dashboard always sends the admin code. Phones always use `?home=`. |
+| `/api/action` body (B #1) | Confirmed: `{home_id, action, pending_change_id, expected_revision, request_id}`. |
+| Error shape (B #2) | `{"error":{"code","message"}}` on **every** error, including unknown `/api/*` routes (404 `NOT_FOUND`), wrong methods, and bad JSON (400 `BAD_REQUEST`). |
 | Who serves the build | FastAPI serves `frontend/dist` if it exists. `/api/*` routes come first, then `/assets`, then a fallback to `index.html` for `/phone`, `/dashboard`, and anything else. `index.html`, `sw.js`, `workbox-*`, and the manifest use `no-cache`. Every `/api` response uses `no-store`. |
 | Infeasible requests (A's question) | They **leave a pending change** with `feasible: false`, `explanation`, and `infeasible_reasons`. The phone's **OK** button sends `reject_change` to clear it. `confirm_change` on it returns 400. |
 | `expected_revision` | Optional and informational on `/api/message`. Confirmations go stale by **field values** (PRD §11.5.4), not raw revision: if an edited field no longer has `old_value`, confirm returns `409 STALE_REVISION`. |
@@ -26,7 +28,7 @@ All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.
 | Method, path | Auth | Body | Returns |
 |---|---|---|---|
 | `GET /api/health` | none | | `{status, version, scenario_id, revision, generation, auth_mode, agent_impl, openrouter_configured, model}` |
-| `GET /api/state` | admin for events | | Dashboard view (§3) |
+| `GET /api/state` | admin | | Dashboard view (§3) |
 | `GET /api/state?home=A` | A's token or admin | | Household view (§4) |
 | `POST /api/message` | home | `{"home_id":"A","text":"…","request_id":"phone-a-<uuid>","expected_revision":3}` | `202 {job_id, status, accepted_revision}` |
 | `POST /api/action` | home | `{"home_id":"A","action":"confirm_change"\|"reject_change","pending_change_id":"pc-…","request_id":"phone-a-<uuid>","expected_revision":4}` | `202 {job_id, status, accepted_revision}` |
@@ -44,10 +46,11 @@ All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.
 
 | Kind | Path | Terminal `status` / `result.outcome` |
 |---|---|---|
-| message | `queued → running (stage) →` | `awaiting_confirmation` / `needs_confirmation` (+ `pending_change_id`) |
+| message | `queued → running (stage) →` | `awaiting_confirmation` / `proposed_change` (+ `pending_change_id`) |
 | | | `completed` / `infeasible` (+ `pending_change_id`, `infeasible_reasons`) |
+| | | `completed` / `needs_clarification` (`message` is the agent's question) |
 | | | `completed` / `no_change` (nothing understood or nothing to change) |
-| | | `failed` / `rejected_output`, `error: "BAD_MODEL_OUTPUT: …"` (agent named another home's or an unknown appliance) |
+| | | `failed` / `error`, `error: "BAD_MODEL_OUTPUT: …"` (agent named another home's or an unknown appliance) |
 | | after the resident confirms or rejects | the message job flips to `completed` / `applied` or `rejected` |
 | action confirm | `queued → running →` | `completed` / `applied` (+ `revision`, `proposal_id`, `source`) or `completed` / `infeasible` |
 | action reject | immediate | `completed` / `rejected` (revision bumps) |
@@ -77,7 +80,7 @@ Filtered on the server. Contains:
 - `metrics.*.per_home` and `metrics_flat_rate.*.per_home`: only `{A: …}`. Street totals (`peak_kw`, `capacity_violations`, totals) stay, as do `demand_kw` (aggregate), `capacity_kw`, and `tariff_usd_per_kwh`.
 - `background_kw_by_home`: only `{A: 1.2}`. `homes`: all three names and colors (other homes' `preferences` emptied).
 - `pending_changes`: A's, `status: "pending"` only.
-- `events`: events sent by or to `resident_A`/`agent_A`, plus `all_agents` broadcasts **that carry `home_views.A`** (whose text replaces `text`). Tool events are removed, `data` is null. **A broadcast without `home_views` never reaches a phone.**
+- `events` (C's rule): `tool_call` and `tool_result` are dropped. **If an event has `home_views`**, the phone gets `home_views.A` as `text`, or doesn't get the event at all when there's no `A` key. **If it has no `home_views`**, the phone gets it only when `resident_A` or `agent_A` is the sender or recipient. `data` is null.
 - `activity`: replaced with "Planning with the neighbors…" while anything runs.
 - `coordination.explanation`: `home_explanations.A`, or "The neighborhood plan is set."
 
@@ -97,38 +100,39 @@ The phone shows `events` as-is, sorted by `sequence`. Display `text` and nothing
 | Fallback | `backend → all_agents` | `error` "The household agents didn't answer in time. Using the safe plan." |
 | Tariff change | `backend → all_agents` | `info` |
 
-## 6. Agent seam (C ↔ D)
+## 6. Agent seam (C ↔ D), as C proposed
 
-C implements `backend/agents/orchestrator.py` with:
+C exports these from `backend/agents/__init__.py` (D also looks in `backend.agents.orchestrator`). Each one may be sync or async. The backend imports them when present and otherwise uses D's labeled stubs. `health.agent_impl` reports `live` only when C's function is present **and** `OPENROUTER_API_KEY` is set. `POWERSYNC_AGENT_IMPL=stub` forces D's stubs, and D's tests always do.
 
 ```python
-from backend.simulation.agent_seam import (CoordinateContext, CoordinateResult, Emit,
-                                           InterpretContext, InterpretResult, EditRequest)
-
-async def interpret_request(ctx: InterpretContext, emit: Emit) -> InterpretResult: ...
-async def coordinate_neighborhood(ctx: CoordinateContext, emit: Emit) -> CoordinateResult: ...
+interpret_request(snapshot: dict, home_id: str, text: str, emit, job_id: str) -> dict
+  # {outcome: "proposed_change"|"infeasible"|"needs_clarification"|"no_change"|"error",
+  #  proposed_edits: {edits: [{task_id, field, old_value, new_value, old_time, new_time}]},
+  #  explanation, message, infeasible_reasons}
+coordinate_neighborhood(snapshot: dict, emit, job_id: str, trigger: None | dict) -> dict
+  # {schedule: [{task_id, start_slot, ...}], proposal_id: "P-2", plan_name: "Plan 2",
+  #  source: "live"|"deterministic_fallback", explanation, home_explanations: {A,B,C}}
+announce_commit(snapshot: dict, result: dict, emit, job_id: str) -> None   # optional
 ```
 
-The backend imports each one if present. Otherwise it uses D's labeled stubs, and `health.agent_impl` shows which. `POWERSYNC_AGENT_IMPL=stub` forces the stubs, and tests always do. The models are defined in `backend/simulation/agent_seam.py`.
+- **snapshot** is `engine_api.snapshot_dict(...)`, with `generation, requirements_version, capacity_kw, tariff_mode, tariff_label, tariff_usd_per_kwh[96], homes, tasks, background_kw_by_home, baseline_schedule`, plus `scenario_id, revision, horizon_start, slots, slot_minutes, capacity_tolerance_kw`.
+- **trigger** is `None` for "Coordinate neighborhood". After a confirmed change it is `{home_id, task_id, field, old_value, new_value, old_time, new_time, edits: [...], text}`, where `text` is already third person ("Home A's resident changed their EV charging's finish time to 11:00 PM.").
+- **emit(event) → event_id** is sync and stores the event right away. C fills `sender, recipient, type, text (≤800), round, proposal_id, reply_to_event_id, source, home_views, data`. D fills `id, sequence, timestamp, revision`. `emit({"stage": text or None})` sets `state.activity`. It returns `""` after a reset: stop and return.
+- **D re-checks everything C returns.** Edits to another home's task or an unknown task fail the job (`error`, `BAD_MODEL_OUTPUT`). D's engine decides feasibility and rewrites `old_value`, `old_time`, and `new_time` from the canonical tasks. `outcome: "error"`, an exception, or a timeout (`POWERSYNC_AGENT_TIMEOUT_S`, default 30 s for interpret and 60 s for coordinate) sends the request to D's backup reader, and the conversation says so.
+- **Commit order:** D validates `schedule`, emits `validation` ("Checked Plan 2: …"), commits with one revision bump, **then** calls `announce_commit`. If C has no `announce_commit`, or it fails or exceeds `POWERSYNC_ANNOUNCE_TIMEOUT_S` (10 s), D emits its own commit text. An invalid schedule, exception, or timeout commits D's engine plan as `deterministic_fallback`, with an error event.
+- **Reset** cancels the running task (`asyncio.CancelledError`), so let it propagate.
 
-**`emit(event: dict) -> str`** stores the event **immediately** and returns its id (use it for `reply_to_event_id`). Keys: `sender, recipient, type, text (≤800), round, proposal_id, reply_to_event_id, source ("model"|"system_template"), home_views {A,B,C}, data (flat dict)`. `emit({"stage": "Home B is reviewing Plan 1"})` sets `state.activity` and `job.stage`. It returns `""` if the demo was reset during the job: stop work and return.
+## 7. Engine API for MCP tools (`backend/simulation/engine_api.py`, dict in, dict out, no state)
 
-**Interpret.** `ctx`: `job_id, home_id, text, request_id, request_event_id, snapshot, scenario_date, planning_starts`. Return `InterpretResult(outcome="edits"|"no_change"|"infeasible", edits=[EditRequest(task_id, field, new_value)], explanation, message, infeasible_reasons, source="live")`. `field` is one of `deadline_slot`, `earliest_slot`, `preferred_start_slot`. **D re-checks everything:** another home's task or an unknown task fails the job, and D runs the engine to decide feasibility. If `explanation` is empty, D writes "Change your EV charging's finish time from 1:00 AM to 11:00 PM?". Resolve "11 pm tonight" with `timefmt.clock_to_slot(23, as_deadline=True)` → 20.
-
-**Coordinate.** `ctx`: `job_id, snapshot` (with any confirmed edit already applied), `trigger` (**third person**, such as "Home A's resident changed their EV charging's finish time to 11:00 PM."), `trigger_home_id`, `previous_schedule` (last committed plan or null), `next_plan_number`. Return `CoordinateResult(schedule=[{task_id, start_slot}], proposal_id="P-2", plan_name="Plan 2", pins, explanation, home_explanations, source="live", rounds, model_calls, tool_calls)`. D validates `schedule` against canonical tasks. If it fails, raises, or exceeds `POWERSYNC_AGENT_TIMEOUT_S` (default 60), D commits the engine plan as `deterministic_fallback` and says so. **Don't emit commit events.** D emits validation and commit after the commit succeeds. **Every `all_agents` broadcast needs `home_views`**, or phones won't see it.
-
-Plan numbering: name proposals from `next_plan_number` up. If Plan 1 is proposed and Plan 2 is committed, return `plan_name="Plan 2"`. D's counter continues from the committed plan.
-
-## 7. Engine functions for MCP tools (`backend/simulation/engine.py`, pure, no state)
-
-| MCP tool | Call |
+| Function | Returns |
 |---|---|
-| `get_home_context` | `home_context(snapshot, home_id)` → own tasks (with 12-hour `deadline_time`), background, capacity, `tariff_summary` |
-| `evaluate_schedule` | `evaluate_schedule(snapshot, [{task_id, start_slot}])` → `{valid, findings, metrics, expensive_hours_share_by_home, summary}` |
-| `find_feasible_schedule` | `find_feasible_schedule(snapshot, pins={"a_ev": 15}, preferred_overrides={...})` → `ScheduleResult` (`.to_dict()`: `ok, status (found / impossible / budget_exhausted / bad_input), reasons, schedule`) |
-| `compare_schedules` | `compare_schedules(snapshot, baseline_entries, candidate_entries)` → per-home and total cost changes and moved appliances |
+| `find_feasible_schedule(snapshot, pins=None, preferred_overrides=None)` | `{ok, schedule[entries], reasons[plain English], proven_impossible, status}` (`status`: found, impossible, budget_exhausted, or bad_input) |
+| `evaluate_schedule(snapshot, schedule)` | `{valid, findings[], metrics (per_home keyed A/B/C, or None if invalid), summary, expensive_hours_share_by_home}` |
+| `compare_schedules(snapshot, baseline, candidate)` | per-home and total cost changes, plus moved appliances with 12-hour times |
+| `get_home_context(snapshot, home_id)` | own tasks only, plus capacity and `tariff_summary` |
+| `scenario_snapshot(tariff_mode="tou", tasks=None)` | a fresh snapshot dict from `scenario.json`. **Use this in tests instead of copied data.** |
 
-`Snapshot` is a Pydantic model: send `snapshot.model_dump()` over MCP and rebuild with `Snapshot.model_validate(d)`. Text helpers: `timefmt.slot_to_time`, `span_text`, and `wording.plan_announcement(snap, "Plan 1", before, after, "everyone's preferred times")`, which returns `(text, home_views)`.
+`pins` and `preferred_overrides` map `task_id` to a slot. `expensive_hours_share_by_home` is each home's share of flexible energy at the top price (0 under flat), which works as the agents' `share_in_expensive_hours`. Text helpers: `timefmt.slot_to_time`, `span_text`, `clock_to_slot(23, as_deadline=True)` → 20.
 
 ## 8. Verified numbers (TOU unless noted)
 
@@ -143,4 +147,4 @@ Per home, Plan 1 → pinned: A $18.59 → $18.59, **B $13.67 → $12.70 (−$0.9
 
 ## 9. Environment
 
-`.env` at the repo root: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `DEMO_ADMIN_TOKEN`, `DEMO_HOME_A_TOKEN`, `DEMO_HOME_B_TOKEN`, `DEMO_HOME_C_TOKEN`, `OPENROUTER_TIMEOUT_SECONDS`, `OPENROUTER_JOB_SECONDS`, `POWERSYNC_AGENT_TIMEOUT_S` (D's outer guard per agent call: interpret default 30 s, coordinate default 60 s), and `POWERSYNC_AGENT_IMPL` (`auto` or `stub`). Blank tokens mean dev-open. Restart the backend after editing `.env`.
+`.env` at the repo root: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `DEMO_ADMIN_TOKEN`, `DEMO_HOME_A_TOKEN`, `DEMO_HOME_B_TOKEN`, `DEMO_HOME_C_TOKEN`, `OPENROUTER_TIMEOUT_SECONDS`, `OPENROUTER_JOB_SECONDS`, `POWERSYNC_AGENT_TIMEOUT_S` (D's outer guard per agent call: interpret default 30 s, coordinate default 60 s), `POWERSYNC_ANNOUNCE_TIMEOUT_S` (default 10 s), and `POWERSYNC_AGENT_IMPL` (`auto` or `stub`). Blank tokens mean dev-open. Restart the backend after editing `.env`.

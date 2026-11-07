@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .agent_seam import (
-    CoordinateContext, CoordinateFn, CoordinateResult, InterpretContext, InterpretFn,
+    AnnounceFn, CoordinateContext, CoordinateFn, CoordinateResult, InterpretContext, InterpretFn,
     InterpretResult, stub_interpret,
 )
 from .engine import (
@@ -59,7 +59,8 @@ class StoreError(Exception):
 
 class Store:
     def __init__(self, interpret: InterpretFn, coordinate: CoordinateFn, agent_impl: dict[str, str],
-                 openrouter_configured: bool = False):
+                 openrouter_configured: bool = False, announce: Optional[AnnounceFn] = None):
+        self.announce_fn = announce
         self.interpret_fn = interpret
         self.coordinate_fn = coordinate
         self.agent_impl = dict(agent_impl)
@@ -259,7 +260,7 @@ class Store:
             msg = result.message or ("That can't be done: " + " ".join(result.infeasible_reasons)
                                      if result.infeasible_reasons else "There's nothing to change in your plan.")
             reply(msg)
-            outcome = "infeasible" if result.outcome == "infeasible" else "no_change"
+            outcome = result.outcome if result.outcome in ("infeasible", "needs_clarification") else "no_change"
             self.finish(job, "completed", outcome, msg, infeasible_reasons=result.infeasible_reasons)
             return
 
@@ -279,7 +280,7 @@ class Store:
             msg = "Your request couldn't be applied safely: it referred to " + "; ".join(sorted(set(problems))) + "."
             self.emit_system(job, sender="validator", recipient=f"resident_{home_id}", type="error", text=msg,
                              reply_to_event_id=req_eid)
-            self.finish(job, "failed", "rejected_output", msg, error="BAD_MODEL_OUTPUT: " + "; ".join(problems))
+            self.finish(job, "failed", "error", msg, error="BAD_MODEL_OUTPUT: " + "; ".join(problems))
             return
 
         edits = []
@@ -323,7 +324,7 @@ class Store:
         if feasible:
             reply(f"{explanation} Confirm on your phone to replan with the neighbors.")
             job.status, job.stage = "awaiting_confirmation", "Waiting for you to confirm"
-            job.result = {"outcome": "needs_confirmation", "message": explanation, "pending_change_id": pc.id}
+            job.result = {"outcome": "proposed_change", "message": explanation, "pending_change_id": pc.id}
             job.updated_at = now()
         else:
             reply(explanation)
@@ -381,6 +382,7 @@ class Store:
         new_tasks = list(self.tasks)
         rv = self.requirements_version
         trigger = None
+        trigger_change = None
         if pc is not None:
             by_id = {t.id: t for t in new_tasks}
             for e in pc.proposed_edits.edits:
@@ -392,6 +394,11 @@ class Store:
             parts = [f"{noun(snap0.task_map()[e.task_id])}'s {FIELD_WORDS[e.field]} to {e.new_time}"
                      for e in pc.proposed_edits.edits]
             trigger = f"{hn}'s resident changed their " + " and ".join(parts) + "."
+            e0 = pc.proposed_edits.edits[0]
+            trigger_change = {"home_id": pc.home_id, "task_id": e0.task_id, "field": e0.field,
+                              "old_value": e0.old_value, "new_value": e0.new_value,
+                              "old_time": e0.old_time, "new_time": e0.new_time,
+                              "edits": [x.model_dump() for x in pc.proposed_edits.edits]}
             views = {h.id: (f"You changed your " + " and ".join(parts) + ". Replanning with the neighbors."
                             if h.id == pc.home_id else f"{hn}'s resident changed a requirement. Replanning the street.")
                      for h in snap0.homes}
@@ -412,7 +419,7 @@ class Store:
             return
 
         ctx = CoordinateContext(job_id=job.id, snapshot=snap, trigger=trigger,
-                                trigger_home_id=pc.home_id if pc else None,
+                                trigger_home_id=pc.home_id if pc else None, trigger_change=trigger_change,
                                 previous_schedule=self.coordinated, next_plan_number=self.plan_counter + 1)
         timeout = env_float("POWERSYNC_AGENT_TIMEOUT_S", 60.0)
         source, failure = "stub", None
@@ -439,6 +446,8 @@ class Store:
             schedule = canonical_schedule(snap, result.schedule)
             source = result.source
             plan_name = result.plan_name or f"Plan {self.plan_counter + 1}"
+            if source == "deterministic_fallback":
+                self.ai_mode = "unavailable"
             proposal_id = result.proposal_id
             explanation, home_expl = result.explanation, result.home_explanations
             if result.source == "live":
@@ -479,9 +488,20 @@ class Store:
                 self._stale_conflicting_pending(pc)
             self.revision += 1
             self._recompute()
-            c_text, c_views = commit_text(snap, plan_name, schedule, previous, baseline_after)
-            self.emit_system(job, sender="coordinator", recipient="all_agents", type="commit", text=c_text,
-                             home_views=c_views, proposal_id=proposal_id, data={"source": source})
+            announced = False
+            if self.announce_fn is not None and result is not None:
+                try:
+                    await asyncio.wait_for(self.announce_fn(snap, result, emit, job.id),
+                                           timeout=env_float("POWERSYNC_ANNOUNCE_TIMEOUT_S", 10.0))
+                    announced = True
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:  # noqa: BLE001  fall back to D's template
+                    print(f"[powersync] announce_commit failed: {type(e).__name__}: {e}", file=sys.stderr)
+            if not announced:
+                c_text, c_views = commit_text(snap, plan_name, schedule, previous, baseline_after)
+                self.emit_system(job, sender="coordinator", recipient="all_agents", type="commit", text=c_text,
+                                 home_views=c_views, proposal_id=proposal_id, data={"source": source})
             self.activity = None
             outcome = "applied" if pc is not None else "committed"
             self.finish(job, "completed", outcome, f"{plan_name} committed.", revision=self.revision,
@@ -596,17 +616,19 @@ class Store:
     def _home_event(e: AgentEvent, home_id: str) -> Optional[dict[str, Any]]:
         if e.type in PRIVATE_EVENT_TYPES:
             return None
-        mine = {f"resident_{home_id}", f"agent_{home_id}"}
-        direct = e.sender in mine or e.recipient in mine
-        broadcast = e.recipient == "all_agents"
-        if not (direct or broadcast):
-            return None
-        text = (e.home_views or {}).get(home_id)
-        if text is None and broadcast and not direct:
-            return None  # a broadcast with no per-home wording might name other homes: don't send it
+        # With home_views: show only this home's wording, or nothing.
+        # Without home_views: show only events this home sent or received.
+        if e.home_views is not None:
+            text = e.home_views.get(home_id)
+            if text is None:
+                return None
+        else:
+            mine = {f"resident_{home_id}", f"agent_{home_id}"}
+            if e.sender not in mine and e.recipient not in mine:
+                return None
+            text = e.text
         d = e.model_dump()
         d.pop("home_views", None)
         d["data"] = None
-        if text is not None:
-            d["text"] = text
+        d["text"] = text
         return d
