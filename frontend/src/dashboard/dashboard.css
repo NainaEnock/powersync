@@ -1,0 +1,11 @@
+.dash { max-width: 1440px; margin: 0 auto; padding: 16px 24px; }
+.dash-top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.dash-top h1 { margin: 0; font-size: 24px; }
+.dash-top-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.banner-sample, .banner-error { margin: 12px 0; padding: 8px 12px; border-radius: 8px; font-weight: 600; }
+.banner-sample { background: var(--warn-bg); color: var(--warn-fg); }
+.banner-error { background: var(--bad-bg); color: var(--bad-fg); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 16px; }
+.card h2 { margin: 0 0 12px; font-size: 16px; }
+.metrics { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.metrics th, .metrics td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
