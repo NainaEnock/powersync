@@ -1,0 +1,25 @@
+:root {
+  --bg: #0f172a; --card: #111c33; --fg: #e2e8f0; --muted: #94a3b8; --border: #23324f;
+  --ok-bg: #064e3b; --ok-fg: #a7f3d0; --warn-bg: #78350f; --warn-fg: #fde68a; --bad-bg: #7f1d1d; --bad-fg: #fecaca;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: var(--bg); }
+a { color: #93c5fd; }
+button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: #1e293b; color: var(--fg); font: inherit; cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: not-allowed; }
+.muted { color: var(--muted); }
+.landing { padding: 24px; }
+.status-badge { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px;
+  font-size: 13px; background: #1e293b; border: 1px solid var(--border);
+}
+.pill-ok { background: var(--ok-bg); color: var(--ok-fg); }
+.pill-warn { background: var(--warn-bg); color: var(--warn-fg); }
+.pill-bad { background: var(--bad-bg); color: var(--bad-fg); }
