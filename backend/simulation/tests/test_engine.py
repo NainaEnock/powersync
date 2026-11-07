@@ -138,3 +138,30 @@ def test_evaluate_schedule_summary():
                                   for e in find_feasible_schedule(TOU).schedule])
     assert out["valid"] and "15 kW" in out["summary"]
     entry_for(TOU.tasks[0], 0)
+
+
+def test_engine_api_dicts_for_mcp():
+    import json
+    from backend.simulation import engine_api as api
+    snap = api.scenario_snapshot()
+    json.dumps(snap)  # JSON-serializable for MCP
+    for k in ("generation", "requirements_version", "capacity_kw", "tariff_mode", "tariff_label",
+              "tariff_usd_per_kwh", "homes", "tasks", "background_kw_by_home", "baseline_schedule"):
+        assert k in snap
+    p1 = api.find_feasible_schedule(snap, pins=None, preferred_overrides=None)
+    assert p1["ok"] and not p1["proven_impossible"]
+    ev = api.evaluate_schedule(snap, p1["schedule"])
+    assert ev["valid"] and ev["metrics"]["variable_cost_usd"] == pytest.approx(50.85, abs=0.005)
+    assert set(ev["metrics"]["per_home"]) == {"A", "B", "C"}
+    p2 = api.find_feasible_schedule(snap, {"a_ev": 15}, {})
+    assert api.evaluate_schedule(snap, p2["schedule"])["metrics"]["per_home"]["B"]["variable_cost_usd"] == pytest.approx(12.70, abs=0.005)
+    late = [dict(t, deadline_slot=8) if t["id"] == "a_ev" else t for t in snap["tasks"]]
+    bad = api.find_feasible_schedule(dict(snap, tasks=late))
+    assert not bad["ok"] and bad["proven_impossible"] and "8:00 PM" in bad["reasons"][0]
+    assert api.evaluate_schedule(snap, p1["schedule"][1:])["valid"] is False
+    minimal = {k: snap[k] for k in ("generation", "requirements_version", "capacity_kw", "tariff_mode", "tariff_label",
+                                    "tariff_usd_per_kwh", "homes", "tasks", "background_kw_by_home")}
+    assert api.find_feasible_schedule(minimal)["ok"]
+    assert api.find_feasible_schedule({"nonsense": 1})["status"] == "bad_input"
+    flat = api.scenario_snapshot("flat")
+    assert api.evaluate_schedule(flat, p1["schedule"])["metrics"]["variable_cost_usd"] == pytest.approx(24.65, abs=0.005)

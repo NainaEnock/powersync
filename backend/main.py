@@ -108,15 +108,17 @@ def rate_limit(key: str, limit: int = 20, window_s: float = 10.0) -> None:
 # ---------------------------------------------------------------- app
 
 def create_app() -> FastAPI:
-    interpret, coordinate, impl = load_agents()
+    interpret, coordinate, impl, announce = load_agents()
     app = FastAPI(title="PowerSync", version=VERSION)
     app.state.store = None
     app.state.impl = (interpret, coordinate, impl)
+    app.state.announce = announce
 
     def store() -> Store:
         if app.state.store is None:  # created lazily inside the running event loop
             i, c, im = app.state.impl
-            app.state.store = Store(i, c, im, openrouter_configured=bool(_tok("OPENROUTER_API_KEY")))
+            app.state.store = Store(i, c, im, openrouter_configured=bool(_tok("OPENROUTER_API_KEY")),
+                                    announce=app.state.announce)
         return app.state.store
 
     def err(status: int, code: str, message: str) -> JSONResponse:
@@ -174,9 +176,8 @@ def create_app() -> FastAPI:
         if home is not None:
             require_home(request, home)
             return s.home_view(home)
-        if bearer(request) and not is_admin(request):
-            raise StoreError(403, "FORBIDDEN", "That code isn't the admin code.")
-        return s.dashboard_view(admin=is_admin(request))
+        require_admin(request)  # the whole dashboard view needs the admin code (PRD §11.3 gap, closed)
+        return s.dashboard_view(admin=True)
 
     @app.post("/api/message", status_code=202)
     async def message(request: Request, body: MessageBody):

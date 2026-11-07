@@ -11,7 +11,7 @@ from backend.simulation.agent_seam import CoordinateResult, InterpretResult, stu
 TOKENS = {"DEMO_ADMIN_TOKEN": "adm", "DEMO_HOME_A_TOKEN": "ta", "DEMO_HOME_B_TOKEN": "tb", "DEMO_HOME_C_TOKEN": "tc"}
 
 
-def make_client(monkeypatch, tokens=None, interpret=None, coordinate=None):
+def make_client(monkeypatch, tokens=None, interpret=None, coordinate=None, announce=None):
     monkeypatch.setenv("POWERSYNC_AGENT_IMPL", "stub")
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     for k in TOKENS:
@@ -21,6 +21,7 @@ def make_client(monkeypatch, tokens=None, interpret=None, coordinate=None):
     if interpret or coordinate:
         i, c, impl = app.state.impl
         app.state.impl = (interpret or i, coordinate or c, impl)
+    app.state.announce = announce
     main._hits.clear()
     return TestClient(app)
 
@@ -161,8 +162,8 @@ def test_auth_enforced(monkeypatch):
         assert r.status_code == 403 and r.json()["error"]["code"] == "FORBIDDEN"
         assert c.get("/api/state?home=A", headers=H("ta")).status_code == 200
         assert c.get("/api/state?home=A", headers=H("adm")).status_code == 200
-        pub = c.get("/api/state").json()
-        assert pub["events_hidden"] is True and pub["events"] == []
+        assert c.get("/api/state").status_code == 401  # whole dashboard view needs admin (B, G2)
+        assert c.get("/api/state", headers=H("ta")).status_code == 403
         assert c.get("/api/state", headers=H("adm")).json()["events_hidden"] is False
         assert c.post("/api/coordinate", headers=H("ta")).status_code == 403
         assert c.post("/api/reset").status_code == 401
@@ -247,3 +248,85 @@ def test_three_phone_burst(client):
         assert wait_job(client, j["job_id"])["status"] == "awaiting_confirmation"
     for h in "ABC":
         assert len(client.get(f"/api/state?home={h}").json()["pending_changes"]) == 1
+
+
+# ---------------------------------------------------------------- C's interface through the adapter
+
+from backend.simulation.agent_seam import adapt_announce, adapt_coordinate, adapt_interpret  # noqa: E402
+from backend.simulation.engine_api import find_feasible_schedule as api_find  # noqa: E402
+
+
+def test_c_style_agents_full_flow(monkeypatch):
+    seen = {}
+
+    def c_interpret(snapshot, home_id, text, emit, job_id=None):  # sync on purpose
+        assert isinstance(snapshot, dict) and len(snapshot["tariff_usd_per_kwh"]) == 96
+        assert "baseline_schedule" in snapshot
+        return {"outcome": "proposed_change", "explanation": "Have your car ready by 11:00 PM instead of 1:00 AM?",
+                "proposed_edits": {"edits": [{"task_id": "a_ev", "field": "deadline_slot", "old_value": 28,
+                                              "new_value": 20, "old_time": "1:00 AM", "new_time": "11:00 PM"}]}}
+
+    async def c_coordinate(snapshot, emit, job_id=None, trigger=None):
+        seen["trigger"] = trigger
+        emit({"stage": "Home B is reviewing Plan 1"})
+        p1 = api_find(snapshot)
+        eid = emit({"sender": "coordinator", "recipient": "all_agents", "type": "proposal", "text": "Here's Plan 1.",
+                    "home_views": {"A": "Plan 1 for A", "B": "Plan 1 for B", "C": "Plan 1 for C"},
+                    "round": 1, "proposal_id": "P-1", "source": "system_template"})
+        ask = emit({"sender": "agent_B", "recipient": "agent_A", "type": "counteroffer", "round": 1,
+                    "text": "Home A, could your car start 45 minutes later?", "reply_to_event_id": eid,
+                    "proposal_id": "P-1", "source": "model"})
+        emit({"sender": "agent_A", "recipient": "agent_B", "type": "review", "round": 1, "text": "Sure.",
+              "reply_to_event_id": ask, "proposal_id": "P-1", "source": "model"})
+        emit({"sender": "agent_B", "recipient": "powersync-energy", "type": "tool_call", "text": "Checking Plan 1"})
+        assert p1["ok"]
+        p2 = api_find(snapshot, pins={"a_ev": 15}) if trigger is None else p1
+        return {"schedule": p2["schedule"], "proposal_id": "P-2", "plan_name": "Plan 2", "source": "live"}
+
+    async def c_announce(snapshot, result, emit, job_id=None):
+        emit({"sender": "coordinator", "recipient": "all_agents", "type": "commit", "text": "Plan 2 is set.",
+              "home_views": {h: f"Plan 2 is set for {h}." for h in "ABC"}, "proposal_id": result["proposal_id"],
+              "source": "system_template"})
+
+    with make_client(monkeypatch, interpret=adapt_interpret(c_interpret), coordinate=adapt_coordinate(c_coordinate),
+                     announce=adapt_announce(c_announce)) as c:
+        job = wait_job(c, c.post("/api/coordinate").json()["job_id"])
+        assert job["result"]["outcome"] == "committed" and job["result"]["source"] == "live"
+        s = c.get("/api/state").json()
+        assert s["metrics"]["coordinated"]["per_home"]["B"]["variable_cost_usd"] == pytest.approx(12.70, abs=0.005)
+        assert s["coordination"]["plan_name"] == "Plan 2" and s["ai_mode"] == "live"
+        texts = [e["text"] for e in s["events"]]
+        assert "Plan 2 is set." in texts and not any("street's plan" in t for t in texts)  # C announced, not D
+        assert seen["trigger"] is None
+
+        # Privacy (C's rule): A sees B's request to it, its own reply, and its own home_views text; never tool events.
+        a = [e["text"] for e in c.get("/api/state?home=A").json()["events"]]
+        assert "Plan 1 for A" in a and "Home A, could your car start 45 minutes later?" in a and "Sure." in a
+        assert "Plan 1 for B" not in a and "Checking Plan 1" not in a
+        cview = [e["text"] for e in c.get("/api/state?home=C").json()["events"]]
+        assert "Sure." not in cview and "Plan 1 for C" in cview
+
+        j = send(c, "A", "car by 11", "c1")
+        assert wait_job(c, j["job_id"])["result"]["outcome"] == "proposed_change"
+        pc = c.get("/api/state?home=A").json()["pending_changes"][0]
+        r = c.post("/api/action", json={"home_id": "A", "action": "confirm_change", "pending_change_id": pc["id"],
+                                        "request_id": "c2"})
+        assert wait_job(c, r.json()["job_id"])["result"]["outcome"] == "applied"
+        t = seen["trigger"]
+        assert t["home_id"] == "A" and t["task_id"] == "a_ev" and t["new_value"] == 20 and t["new_time"] == "11:00 PM"
+        assert t["text"].startswith("Home A's resident changed")
+
+
+def test_c_style_clarification_and_error(monkeypatch):
+    async def ask(snapshot, home_id, text, emit, job_id=None):
+        return {"outcome": "needs_clarification", "message": "Which appliance do you mean?"}
+    with make_client(monkeypatch, interpret=adapt_interpret(ask)) as c:
+        job = wait_job(c, send(c, "B", "do the thing", "q1")["job_id"])
+        assert job["result"]["outcome"] == "needs_clarification" and "Which appliance" in job["result"]["message"]
+
+    async def broken(snapshot, home_id, text, emit, job_id=None):
+        return {"outcome": "error", "message": "model timeout"}
+    with make_client(monkeypatch, interpret=adapt_interpret(broken)) as c:
+        job = wait_job(c, send(c, "A", "Car ready by 11 pm", "q2")["job_id"])
+        assert job["result"]["outcome"] == "proposed_change"  # backup reader took over, and said so
+        assert any("backup reader" in e["text"] for e in c.get("/api/state?home=A").json()["events"])
