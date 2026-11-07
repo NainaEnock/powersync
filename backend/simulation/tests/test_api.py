@@ -330,3 +330,38 @@ def test_c_style_clarification_and_error(monkeypatch):
         job = wait_job(c, send(c, "A", "Car ready by 11 pm", "q2")["job_id"])
         assert job["result"]["outcome"] == "proposed_change"  # backup reader took over, and said so
         assert any("backup reader" in e["text"] for e in c.get("/api/state?home=A").json()["events"])
+
+
+def test_interpreter_reply_source_labels(monkeypatch):
+    async def templ(snapshot, home_id, text, emit, job_id=None):
+        return {"outcome": "proposed_change", "source": "live", "explanation": "Change your car charging finish time?",
+                "proposed_edits": {"edits": [{"task_id": "a_ev", "field": "deadline_slot", "new_value": 20}]}}
+
+    async def question(snapshot, home_id, text, emit, job_id=None):
+        return {"outcome": "needs_clarification", "source": "live", "message": "Which appliance do you mean?"}
+
+    for fn, want in ((templ, "system_template"), (question, "model")):
+        with make_client(monkeypatch, interpret=adapt_interpret(fn)) as c:
+            wait_job(c, send(c, "A", "car by 11", "s-" + want)["job_id"])
+            replies = [e for e in c.get("/api/state?home=A").json()["events"] if e["sender"] == "agent_A"]
+            assert replies and replies[-1]["source"] == want
+
+
+def test_events_visible_before_job_ends(monkeypatch):
+    """G7: Plan 1 reaches /api/state while the coordination job is still running."""
+    async def slow(snapshot, emit, job_id=None, trigger=None):
+        emit({"stage": "Home B is reviewing Plan 1"})
+        emit({"sender": "coordinator", "recipient": "all_agents", "type": "proposal", "text": "Here's Plan 1.",
+              "home_views": {h: "Here's Plan 1." for h in "ABC"}, "round": 1, "proposal_id": "P-1"})
+        await asyncio.sleep(0.6)
+        return {"schedule": api_find(snapshot)["schedule"], "proposal_id": "P-1", "source": "live"}
+    with make_client(monkeypatch, coordinate=adapt_coordinate(slow)) as c:
+        jid = c.post("/api/coordinate").json()["job_id"]
+        time.sleep(0.2)
+        s = c.get("/api/state").json()
+        assert c.get(f"/api/jobs/{jid}").json()["status"] == "running"
+        assert any(e["text"] == "Here's Plan 1." for e in s["events"])
+        assert s["activity"] == "Home B is reviewing Plan 1" and s["job_status"] == "running"
+        assert c.get("/api/state?home=B").json()["activity"] == "Planning with the neighbors…"
+        assert wait_job(c, jid)["status"] == "completed"
+        assert c.get("/api/state").json()["activity"] is None

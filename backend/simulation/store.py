@@ -250,7 +250,7 @@ class Store:
                                result: InterpretResult) -> None:
         snap = self.snapshot()
         tasks = snap.task_map()
-        agent_source = "model" if result.source == "live" else "system_template"
+        agent_source = result.message_source
 
         def reply(text: str, typ: str = "info") -> None:
             self.emit_system(job, sender=f"agent_{home_id}", recipient=f"resident_{home_id}", type=typ,
