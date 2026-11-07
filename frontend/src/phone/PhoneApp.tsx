@@ -377,6 +377,8 @@ function PlanCard({ homeId, state, replanning }: { homeId: HomeId; state: Neighb
   const { entries, coordinated } = currentSchedule(state);
   const tasks = state.tasks.filter((t) => t.home_id === homeId);
   const t = slotToTime;
+  // contract §3 ADDED field; read safely until B adds plan_name to types.ts Coordination.
+  const planName = (state.coordination as { plan_name?: string | null } | null)?.plan_name ?? null;
   return (
     <section className="ps-card">
       <div className="ps-card-head">
@@ -389,9 +391,13 @@ function PlanCard({ homeId, state, replanning }: { homeId: HomeId; state: Neighb
       </div>
       <p className="ps-muted">
         {coordinated
-          ? 'Agreed with the neighborhood and checked by PowerSync.'
+          ? `${planName ? `${planName}, a` : 'A'}greed with the neighborhood and checked by PowerSync.`
           : 'Not coordinated yet. These are your preferred times.'}
       </p>
+      {coordinated && state.coordination?.explanation && <p>{state.coordination.explanation}</p>}
+      {state.coordination?.status === 'stale_tariff' && (
+        <p className="ps-muted">Prices changed since this plan was made. The neighborhood will plan again.</p>
+      )}
       <ul className="ps-plan">
         {tasks.map((task) => {
           const e = entries.find((x) => x.task_id === task.id);
@@ -454,7 +460,10 @@ function ChangeCards({
           <section key={c.id} className="ps-card ps-confirm" aria-live="polite">
             <h2>Confirm a change</h2>
             <p className="ps-question">{changeQuestion(c, state.tasks)}</p>
-            {c.explanation && <p className="ps-muted">{c.explanation}</p>}
+            {/* D's default explanation is the same question in other words; only show extra context. */}
+            {c.explanation && !c.explanation.trim().startsWith('Change ') && (
+              <p className="ps-muted">{c.explanation}</p>
+            )}
             <p className="ps-muted">If you confirm, the neighborhood plans again around it.</p>
             <div className="ps-row">
               <button className="ps-btn ps-primary" disabled={busy} onClick={() => onAct(c, 'confirm_change')}>

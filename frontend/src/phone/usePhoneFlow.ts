@@ -55,12 +55,18 @@ function toApiError(e: unknown): ApiError {
   return new ApiError('UNKNOWN', e instanceof Error ? e.message : String(e), 0);
 }
 
+// Job errors arrive as "CODE: message" (contract §2). Show residents plain English, never a code.
 function jobErrorText(error: string | null, fallback?: string): string {
+  const code = error?.split(':', 1)[0]?.trim() ?? '';
+  if (code === 'RESET') return 'The demo was reset, so that request was cancelled. Please send it again.';
+  if (code === 'BAD_MODEL_OUTPUT')
+    return "Your agent couldn't understand that right now, so nothing was changed.";
+  if (fallback) return fallback;
   if (error) {
     const idx = error.indexOf(':');
     return idx >= 0 ? error.slice(idx + 1).trim() : error;
   }
-  return fallback ?? 'The request failed.';
+  return 'The request failed. Nothing was changed.';
 }
 
 export function usePhoneFlow(
@@ -96,7 +102,7 @@ export function usePhoneFlow(
     setFlow((f) => {
       if (f.jobId !== job.id) return f;
       const base = { ...IDLE, jobId: job.id, kind };
-      if (job.status === 'failed') return { ...base, phase: 'failed', message: jobErrorText(job.error, msg ?? undefined) };
+      if (job.status === 'failed') return { ...base, phase: 'failed', message: jobErrorText(job.error) };
       if (f.quiet) return IDLE;
       if (job.status === 'awaiting_confirmation' || outcome === 'proposed_change')
         return { ...base, phase: 'confirm', message: msg };
