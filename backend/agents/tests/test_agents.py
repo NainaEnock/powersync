@@ -388,3 +388,30 @@ def test_closing_summary_counts_only_when_live(snapshot):
 def test_confirmation_wording(snapshot):
     res, _ = run(_interpret(snapshot, "A", "I leave at 11 pm tonight. Have my car ready by then.", RuleStubModel()))
     assert res["explanation"] == "Change the finish time for your car charging from 1:00 AM to 11:00 PM?"
+
+
+def test_rule_stub_understands_added_appliances():
+    """The no-key fallback reader maps residents' words to the appliances they can now add."""
+    from backend.agents.stub_model import _rule_interpret
+    tasks = [
+        {"id": "a_dish", "label": "dishwasher"},
+        {"id": "a_washer", "label": "washing machine"},
+        {"id": "a_water_heater", "label": "water heater"},
+        {"id": "a_ac", "label": "air conditioning"},
+        {"id": "a_pool_pump", "label": "pool pump"},
+    ]
+    def task_for(text):
+        out = _rule_interpret({"text": text, "tasks": tasks})
+        return out["edits"][0]["task_id"] if out["understood"] else None
+    assert task_for("Run the pool pump so it's done by 2 am") == "a_pool_pump"
+    assert task_for("I need hot water by 6 am") == "a_water_heater"
+    assert task_for("Cool the house with the AC by 10 pm") == "a_ac"
+    assert task_for("Washer done by 9 pm please") == "a_washer"
+    assert task_for("Dishwasher done by 10 pm") == "a_dish"  # not the washing machine
+
+
+def test_review_lists_appliances_in_plain_english():
+    from backend.agents.wording import and_join
+    assert and_join(["dryer"]) == "dryer"
+    assert and_join(["dryer", "dishwasher"]) == "dryer and dishwasher"
+    assert and_join(["dryer", "dishwasher", "pool pump"]) == "dryer, dishwasher, and pool pump"
