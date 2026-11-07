@@ -48,18 +48,25 @@ export function expensiveRuns(prices: number[]): [number, number][] {
   return runs
 }
 
-export function DemandChart({ state, onFlatChange, tariffBusy }: {
+/** Which schedule the chart and timeline show. Jumps to the coordinated plan when one first commits,
+ *  and back to preferred times after a reset. Shared so both views always agree. */
+export function useScheduleFocus(state: NeighborhoodState | null) {
+  const hasPlan = !!state?.demand_kw.coordinated
+  const [focus, setFocus] = useState<ScheduleKind>(hasPlan ? 'coordinated' : 'baseline')
+  useEffect(() => {
+    setFocus(hasPlan ? 'coordinated' : 'baseline')
+  }, [hasPlan])
+  return [focus, setFocus] as const
+}
+
+export function DemandChart({ state, focus, onFocus, onFlatChange, tariffBusy }: {
   state: NeighborhoodState
+  focus: ScheduleKind
+  onFocus: (k: ScheduleKind) => void
   onFlatChange: (flat: boolean) => void
   tariffBusy: boolean
 }) {
-  const hasPlan = !!state.demand_kw.coordinated
-  const [focus, setFocus] = useState<ScheduleKind>(hasPlan ? 'coordinated' : 'baseline')
-  useEffect(() => {
-    // Jump to the coordinated view when a plan first commits; back to preferred after a reset.
-    setFocus(hasPlan ? 'coordinated' : 'baseline')
-  }, [hasPlan])
-
+  const setFocus = onFocus
   const cap = state.capacity_kw
   const d = state.demand_kw
   const xEnd = windowEnd(state.tasks)

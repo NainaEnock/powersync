@@ -5,7 +5,7 @@ import { StatusBadge } from '../StatusBadge'
 import type { ErrorCode, NeighborhoodState } from '../types'
 import { AdminCode } from './AdminCode'
 import { ConversationPanel } from './ConversationPanel'
-import { DemandChart } from './DemandChart'
+import { DemandChart, useScheduleFocus } from './DemandChart'
 import { HomeCards } from './HomeCards'
 import { MetricTiles } from './MetricTiles'
 import { Timeline } from './Timeline'
@@ -54,6 +54,7 @@ export function Dashboard({ api }: { api: Api }) {
 
   const running = s?.job_status === 'running' || job.job?.status === 'queued' || job.job?.status === 'running'
   const paced = usePacedEvents(s?.events, s?.generation)
+  const [focus, setFocus] = useScheduleFocus(s)
 
   const [view, setViewState] = useState<View>(viewFromUrl)
   const setView = (v: View) => {
@@ -199,10 +200,12 @@ export function Dashboard({ api }: { api: Api }) {
               <MetricTiles state={s} />
               <DemandChart
                 state={s}
+                focus={focus}
+                onFocus={setFocus}
                 onFlatChange={setFlat}
                 tariffBusy={pending === 'tariff' || running || api.mode === 'sample'}
               />
-              <Timeline state={s} />
+              <Timeline state={s} focus={focus} />
               <HomeCards state={s} />
             </>
           )}
