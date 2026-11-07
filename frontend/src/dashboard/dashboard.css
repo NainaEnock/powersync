@@ -246,3 +246,7 @@
 .tile-kind.kind-coordinated { background: var(--brand-soft); color: var(--brand); }
 .tile-kind.kind-independent { background: #e3f3ec; color: #13704f; }
 .tile-sub.bad { color: var(--bad-fg); font-weight: 600; }
+
+/* more appliances: the timeline scrolls inside its card instead of pushing the page */
+.timeline-card .tl { max-height: 250px; overflow-y: auto; }
+.timeline-card .tl-axis { position: sticky; top: 0; background: var(--card); z-index: 3; }

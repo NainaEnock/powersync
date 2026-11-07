@@ -178,6 +178,9 @@ export function Dashboard({ api }: { api: Api }) {
       {s?.coordination?.status === 'stale_tariff' && (
         <div className="banner banner-warn">{s.coordination.reasons[0] ?? 'Plan priced under the previous tariff. Coordinate again.'}</div>
       )}
+      {s?.coordination?.status === 'not_run' && s.coordination.reasons.length > 0 && (
+        <div className="banner banner-warn">{s.coordination.reasons[0]}</div>
+      )}
 
       <nav className="tabs" role="tablist" aria-label="Dashboard view">
         <button role="tab" aria-selected={view === 'overview'} className={view === 'overview' ? 'on' : ''} onClick={() => setView('overview')}>

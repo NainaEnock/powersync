@@ -405,3 +405,53 @@ def test_engine_verdict_decides_the_wording(monkeypatch):
         assert pc["feasible"] is True
         assert pc["explanation"].startswith("Change ")
         assert "can't" not in j["result"]["message"]
+
+
+def test_residents_add_and_remove_appliances(monkeypatch):
+    with make_client(monkeypatch) as c:
+        cat = c.get("/api/appliances/catalog").json()
+        kinds = {a["kind"] for a in cat["schedulable"]}
+        assert {"washer", "water_heater", "ac", "pool_pump"} <= kinds and "microwave" not in kinds
+
+        wait_job(c, c.post("/api/coordinate", json={}).json()["job_id"])
+        rev = c.get("/api/state").json()["revision"]
+
+        r = c.post("/api/appliances", json={"home_id": "A", "action": "add", "kind": "washer", "deadline_slot": 16})
+        assert r.status_code == 200 and r.json()["task_id"] == "a_washer"
+        s = c.get("/api/state").json()
+        assert s["revision"] == rev + 1
+        assert s["coordinated_schedule"] is None and s["coordination"]["status"] == "not_run"
+        assert "Coordinate again" in s["coordination"]["reasons"][0]
+        washer = next(t for t in s["tasks"] if t["id"] == "a_washer")
+        assert washer["deadline_slot"] == 16 and washer["power_kw"] == 0.5
+        assert s["metrics"]["baseline"]["tasks_total"] == 7
+
+        # Privacy: Home B never sees Home A's new appliance or its wording.
+        b = c.get("/api/state?home=B").json()
+        assert all(t["home_id"] == "B" for t in b["tasks"])
+        assert not any("washing machine" in e["text"] for e in b["events"])
+
+        # The planner covers the new appliance.
+        wait_job(c, c.post("/api/coordinate", json={}).json()["job_id"])
+        s = c.get("/api/state").json()
+        assert any(e["task_id"] == "a_washer" for e in s["coordinated_schedule"])
+        assert s["metrics"]["coordinated"]["tasks_completed"] == 7
+
+        assert c.post("/api/appliances", json={"home_id": "B", "action": "remove", "task_id": "a_washer"}).status_code == 403
+        assert c.post("/api/appliances", json={"home_id": "A", "action": "add", "kind": "ev", "deadline_slot": 4}).status_code == 400
+        assert c.post("/api/appliances", json={"home_id": "A", "action": "add", "kind": "microwave"}).status_code == 400
+        assert c.post("/api/appliances", json={"home_id": "A", "action": "remove", "task_id": "a_washer"}).status_code == 200
+        assert not any(t["id"] == "a_washer" for t in c.get("/api/state").json()["tasks"])
+
+        c.post("/api/appliances", json={"home_id": "C", "action": "add", "kind": "pool_pump"})
+        c.post("/api/reset", json={})
+        assert len(c.get("/api/state").json()["tasks"]) == 6  # reset restores the original scenario
+
+
+def test_appliance_changes_need_the_home_code(monkeypatch):
+    toks = {"DEMO_ADMIN_TOKEN": "ta", "DEMO_HOME_A_TOKEN": "t1", "DEMO_HOME_B_TOKEN": "t2", "DEMO_HOME_C_TOKEN": "t3"}
+    with make_client(monkeypatch, tokens=toks) as c:
+        body = {"home_id": "A", "action": "add", "kind": "washer"}
+        assert c.post("/api/appliances", json=body).status_code == 401
+        assert c.post("/api/appliances", json=body, headers=H("t2")).status_code == 403
+        assert c.post("/api/appliances", json=body, headers=H("t1")).status_code == 200
