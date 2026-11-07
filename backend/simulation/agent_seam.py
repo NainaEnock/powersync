@@ -53,6 +53,8 @@ class InterpretResult(BaseModel):
     message: str = ""              # reply to the resident when there's nothing to confirm
     infeasible_reasons: list[str] = Field(default_factory=list)
     source: Literal["live", "stub"] = "live"
+    # Who wrote the text shown to the resident: only a model-written clarifying question is "model".
+    message_source: Literal["model", "system_template"] = "system_template"
 
 
 class CoordinateContext(BaseModel):
@@ -199,11 +201,16 @@ def adapt_interpret(fn: Callable[..., Any]) -> InterpretFn:
             raise ValueError(f"unknown interpreter outcome {outcome!r}")
         if mapped == "infeasible" and edits:
             mapped = "edits"  # D's engine decides feasibility; the change card shows the reason
+        source = "stub" if out.get("source") in ("stub", "system_template") else "live"
+        msg_src = out.get("message_source")
+        if msg_src not in ("model", "system_template"):
+            # C's interpreter writes every reply from code templates except the clarifying question.
+            msg_src = "model" if (mapped == "needs_clarification" and source == "live") else "system_template"
         return InterpretResult(
             outcome=mapped, edits=edits, explanation=str(out.get("explanation") or ""),
             message=str(out.get("message") or out.get("question") or ""),
             infeasible_reasons=[str(r) for r in out.get("infeasible_reasons") or []],
-            source="stub" if out.get("source") in ("stub", "system_template") else "live",
+            source=source, message_source=msg_src,
         )
     return interpret
 
