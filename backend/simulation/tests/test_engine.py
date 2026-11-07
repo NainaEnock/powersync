@@ -165,3 +165,9 @@ def test_engine_api_dicts_for_mcp():
     assert api.find_feasible_schedule({"nonsense": 1})["status"] == "bad_input"
     flat = api.scenario_snapshot("flat")
     assert api.evaluate_schedule(flat, p1["schedule"])["metrics"]["variable_cost_usd"] == pytest.approx(24.65, abs=0.005)
+
+
+def test_reasons_say_car_charging_not_ev():
+    tasks = [t.model_copy(update={"deadline_slot": 8}) if t.id == "a_ev" else t for t in scenario_tasks()]
+    r = find_feasible_schedule(build_snapshot(tasks=tasks))
+    assert "Home A's car charging needs 3 hours" in r.reasons[0] and "ev charging" not in r.reasons[0]

@@ -125,7 +125,8 @@ class ScheduleResult:
 
 def _task_label(t: Task, snap: Snapshot) -> str:
     home = next((h.name for h in snap.homes if h.id == t.home_id), f"Home {t.home_id}")
-    return f"{home}'s {t.name.lower()}"
+    name = "car " + t.name[3:] if t.name.lower().startswith("ev ") else t.name.lower()
+    return f"{home}'s {name}"
 
 
 def window_problem(t: Task, snap: Snapshot) -> Optional[str]:
