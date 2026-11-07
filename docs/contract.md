@@ -23,7 +23,7 @@ Run: `source .venv/bin/activate && pip install -r backend/requirements.txt` then
 
 ## 2. Endpoints
 
-All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.2). Bodies over 16 KB → `413 PAYLOAD_TOO_LARGE`. More than 20 POSTs in 10 s per home (or admin) → `429 RATE_LIMITED`.
+All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.2). Bodies over 16 KB → `413 PAYLOAD_TOO_LARGE`. More than 20 POSTs in 10 s per home (or admin) → `429 RATE_LIMITED`. Appliance codes `ALREADY_ADDED` and `WONT_FIT` (both `409`) are described under Appliance editing below.
 
 | Method, path | Auth | Body | Returns |
 |---|---|---|---|
@@ -61,10 +61,14 @@ All bodies are JSON. Errors are always `{"error":{"code","message"}}` (PRD §11.
 
 Confirm **applies the edit and replans in one job, with one revision bump**.
 
-### Appliance editing (added by B in PR #28, reviewed by D)
+### Appliance editing (added by B in PR #28, reviewed by D; rules from PR #32)
 
-- Kinds: `ev`, `dryer`, `washer`, `dishwasher`, `water_heater`, `ac`, `pool_pump` (values in `backend/simulation/appliances.py`). New task IDs are `<home>_<kind>`, with a number added if needed (`a_water_heater`, `a_ev2`).
+- Kinds: `ev`, `dryer`, `washer`, `dishwasher`, `water_heater`, `ac`, `pool_pump` (values in `backend/simulation/appliances.py`). New task IDs are `<home>_<kind>` (`a_water_heater`). A removed appliance added again gets the same ID back.
+- **One of each per home.** Adding an appliance whose name the home already has → `409 ALREADY_ADDED` ("Your home already has a washing machine. To change when it's done, ask your agent."). This counts the scenario's own appliances (Home B can't add a second dryer) and makes a repeated Add tap harmless.
+- **Must fit the street.** Before adding, the engine runs `find_feasible_schedule` on the new set. No plan under the limit with every deadline → `409 WONT_FIT` with the engine's reason and "Try a later finish time." Nothing changes, and `revision` stays the same.
 - Limits: at most 6 appliances per home, at least 1. A deadline shorter than the run time → `400`. Another home's appliance → `403`. Unknown `task_id` → `404`. Any job queued or running → `409 JOB_RUNNING`.
+- Check order on add: unknown kind (`400`) → already added (`409`) → over 6 (`400`) → deadline too short (`400`) → won't fit (`409`).
+- Phone: owned appliances show as "(already added)" and can't be picked. The phone shows the server's `message` for both new codes.
 - Effect: `requirements_version` and `revision` go up, the committed plan is cleared (`coordinated_schedule: null`, `coordination.status: "not_run"`, `reasons[0]`: "Appliances changed. Coordinate again to plan the new set."), and a pending change to a removed appliance becomes `stale`. The three comparison schedules are recomputed. One `info` event: the home sees "You added …", the others see "Home A added an appliance …" (never its name).
 - Reset restores the six scenario appliances. **Demo note:** this changes the §9.4 conflict, so run the main story (Plan 1 → B objects → Plan 2) before anyone adds or removes appliances.
 - Scheduler load, measured: 15–18 appliances, feasible or impossible, finish in ≤0.4 s, with a hard cap of about 1 s (50,000-option search budget).
