@@ -23,7 +23,7 @@ export function MetricTiles({ state }: { state: NeighborhoodState }) {
       fmt: kw,
       delta: (a, b) => (Math.abs(a - b) < 0.05 ? 'no change' : `${a < b ? '−' : '+'}${Math.abs(a - b).toFixed(1)} kW`),
     },
-    { title: 'Energy used', value: (m) => m.energy_kwh, fmt: kwh, note: 'Moving appliances never changes energy.' },
+    { title: 'Energy used', value: (m) => m.energy_kwh, fmt: kwh, note: 'Moving appliances never changes it.' },
     {
       title: 'Appliances done on time',
       value: (m) => m.tasks_completed,
@@ -42,7 +42,7 @@ export function MetricTiles({ state }: { state: NeighborhoodState }) {
               {head ? t.fmt(t.value(head)) : <span className="muted">Not planned yet</span>}
             </div>
             {head && baseline && t.delta && (
-              <div className="tile-delta">{t.delta(t.value(head), t.value(baseline))} vs. everyone at preferred times</div>
+              <div className="tile-delta">{t.delta(t.value(head), t.value(baseline))} vs. preferred times</div>
             )}
             <dl className="tile-compare">
               {baseline && (
