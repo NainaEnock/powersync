@@ -358,3 +358,33 @@ def test_tool_call_loop_dispatches_through_mcp(snapshot):
     assert seen["tool_msgs"] >= 3
     assert any(e["data"].get("tool") == "get_home_context" for e in rec.of("tool_call"))
     assert res["proposal_id"] == "P-2"
+
+
+def test_plan_1_groups_small_appliances(snapshot):
+    _, rec = run(_coordinate(snapshot, RuleStubModel()))
+    p1 = rec.of("proposal")[0]["text"]
+    assert "the three dishwashers shift to 9:00–11:00 PM" in p1
+    assert "Home A's car charging starts at 9:00 PM instead of 6:00 PM" in p1
+    assert "Still in the expensive hours: Home B's dryer" in p1
+    assert len(p1) < 500
+
+
+def test_model_kw_decimals_tidied(snapshot):
+    from backend.agents.wording import clean_model_text
+    assert clean_model_text("under the 15.0 kW limit at 13.2 kW", snapshot, set()) == "under the 15 kW limit at 13.2 kW"
+
+
+def test_closing_summary_counts_only_when_live(snapshot):
+    live = RuleStubModel()
+    live.impl = "live"
+    _, rec = run(_coordinate(snapshot, live))
+    last = rec.of("info")[-1]["text"]
+    assert "AI replies" in last and "checks through the powersync-energy tools" in last
+    assert "second" not in last  # the dashboard paces messages, so no durations
+    _, rec = run(_coordinate(snapshot, RuleStubModel()))
+    assert "AI replies" not in rec.of("info")[-1]["text"]
+
+
+def test_confirmation_wording(snapshot):
+    res, _ = run(_interpret(snapshot, "A", "I leave at 11 pm tonight. Have my car ready by then.", RuleStubModel()))
+    assert res["explanation"] == "Change the finish time for your car charging from 1:00 AM to 11:00 PM?"

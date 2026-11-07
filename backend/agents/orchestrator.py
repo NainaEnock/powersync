@@ -181,6 +181,9 @@ class _Negotiation:
         except (ToolUnavailable, BudgetExceeded):
             pass  # D's validator is the real gate
         msg = f"{current.name} goes to the final check before it becomes the neighborhood plan."
+        if self.model.impl == "live":
+            msg += (f" The household agents sent {self.budget.model_successes} AI replies, and the planner ran "
+                    f"{self.budget.tool_calls} checks through the powersync-energy tools.")
         await self._info(msg, self.rounds, current)
         return self._result("plan_ready", msg, current)
 

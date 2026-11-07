@@ -113,6 +113,7 @@ def clean_model_text(text: str, snap: dict[str, Any], allowed_money: set[str]) -
     for t in snap["tasks"]:
         out = re.sub(rf"\b{re.escape(t['id'])}\b", possessive(snap, t["home_id"], t), out)
     out = to_12_hour_text(out)
+    out = re.sub(r"\b(\d+)\.0\s?kW\b", r"\1 kW", out)
     for m in _MONEY.findall(out):
         if m.replace(" ", "") not in allowed_money:
             return None
@@ -137,6 +138,30 @@ def _move_phrase(snap, task, frm: int, to: int, *, own: bool = False) -> str:
     return f"{who} {verb} at {slot_to_time(to)} instead of {slot_to_time(frm)}"
 
 
+SMALL_KW = 3.0  # appliances below this are grouped by type so big moves stand out
+_COUNT = {2: "both", 3: "the three", 4: "the four", 5: "the five", 6: "the six"}
+
+
+def _changes_text(snap, moved: list[tuple[dict, int, int]]) -> str:
+    """Big moves one by one; two or more small moves of one type as a group:
+    "the three dishwashers shift to 9:00–11:00 PM"."""
+    big = [m for m in moved if m[0]["power_kw"] >= SMALL_KW]
+    small: dict[str, list[tuple[dict, int, int]]] = {}
+    for m in moved:
+        if m[0]["power_kw"] < SMALL_KW:
+            small.setdefault(label(m[0]), []).append(m)
+    parts = [_move_phrase(snap, t, f, to) for t, f, to in big]
+    for lab, ms in small.items():
+        if len(ms) == 1:
+            t, f, to = ms[0]
+            parts.append(_move_phrase(snap, t, f, to))
+        else:
+            first = min(to for _, _, to in ms)
+            last = max(to + t["duration_slots"] for t, _, to in ms)
+            parts.append(f"{_COUNT.get(len(ms), str(len(ms)))} {lab}s shift to {slot_range(first, last)}")
+    return "; ".join(parts)
+
+
 def plan_announcement(
     snap: dict[str, Any],
     proposal_id: str,
@@ -157,10 +182,7 @@ def plan_announcement(
     cap = snap["capacity_kw"]
 
     if moved:
-        changes = "; ".join(_move_phrase(snap, t, f, to) for t, f, to in moved[:5])
-        if len(moved) > 5:
-            changes += f"; and {len(moved) - 5} more"
-        what = f"What's different from {previous_name}: {changes}."
+        what = f"What's different from {previous_name}: {_changes_text(snap, moved)}."
     else:
         what = f"Nothing moves compared with {previous_name}."
     pricey = [tasks[t] for t, s in after.items() if exp and expensive_share(tasks[t], s, exp) > 0]
