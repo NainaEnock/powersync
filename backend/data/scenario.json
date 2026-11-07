@@ -1,0 +1,36 @@
+{
+  "scenario_id": "powersync-evening-v2",
+  "description": "Synthetic three-home evening. All values are illustrative, rounded from published US figures (see provenance.md). No real home was measured.",
+  "horizon_start": "2026-07-15T18:00:00-04:00",
+  "timezone": "America/New_York",
+  "slot_minutes": 15,
+  "slots": 96,
+  "capacity_kw": 15.0,
+  "capacity_tolerance_kw": 0.001,
+  "background_kw_per_home": 1.2,
+  "tariffs": {
+    "tou": {
+      "label": "Illustrative time-of-use tariff",
+      "peak_usd_per_kwh": 0.59,
+      "offpeak_usd_per_kwh": 0.33,
+      "peak_slot_ranges": [[0, 12], [88, 96]]
+    },
+    "flat": {
+      "label": "Flat rate (US residential average)",
+      "usd_per_kwh": 0.18
+    }
+  },
+  "homes": [
+    {"id": "A", "name": "Home A", "color": "#2563eb", "preferences": {}},
+    {"id": "B", "name": "Home B", "color": "#d97706", "preferences": {}},
+    {"id": "C", "name": "Home C", "color": "#059669", "preferences": {}}
+  ],
+  "tasks": [
+    {"id": "a_ev",    "home_id": "A", "name": "EV charging",   "power_kw": 7.2, "duration_slots": 12, "earliest_slot": 0, "deadline_slot": 28, "preferred_start_slot": 0, "interruptible": false},
+    {"id": "a_dish",  "home_id": "A", "name": "Dishwasher",    "power_kw": 1.2, "duration_slots": 4,  "earliest_slot": 0, "deadline_slot": 20, "preferred_start_slot": 6, "interruptible": false},
+    {"id": "b_dryer", "home_id": "B", "name": "Clothes dryer", "power_kw": 5.0, "duration_slots": 3,  "earliest_slot": 0, "deadline_slot": 20, "preferred_start_slot": 2, "interruptible": false},
+    {"id": "b_dish",  "home_id": "B", "name": "Dishwasher",    "power_kw": 1.2, "duration_slots": 4,  "earliest_slot": 0, "deadline_slot": 20, "preferred_start_slot": 6, "interruptible": false},
+    {"id": "c_ev",    "home_id": "C", "name": "EV charging",   "power_kw": 7.2, "duration_slots": 12, "earliest_slot": 0, "deadline_slot": 48, "preferred_start_slot": 0, "interruptible": false},
+    {"id": "c_dish",  "home_id": "C", "name": "Dishwasher",    "power_kw": 1.2, "duration_slots": 4,  "earliest_slot": 0, "deadline_slot": 20, "preferred_start_slot": 6, "interruptible": false}
+  ]
+}

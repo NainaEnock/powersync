@@ -1,0 +1,8 @@
+# Owned by D. Python 3.11. Install with: pip install -r backend/requirements.txt
+fastapi==0.162.2
+uvicorn==0.54.0
+httpx==0.28.1
+pydantic==2.14.3
+python-dotenv==1.2.4
+fastmcp==4.1.6
+pytest==9.2.0
