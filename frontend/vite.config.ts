@@ -18,8 +18,8 @@ export default defineConfig({
         start_url: '/phone',
         scope: '/',
         display: 'standalone',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
+        theme_color: '#f3f4ef',
+        background_color: '#f3f4ef',
         // Icon files are added at B6 (icons agreed with A at 1:20).
         icons: [
           { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
