@@ -1,4 +1,4 @@
-import { ArrowUpRight, CalendarClock, ExternalLink, LayoutDashboard, Loader2, MessagesSquare, RotateCcw, Smartphone, Waves, Zap } from 'lucide-react'
+import { ArrowUpRight, ExternalLink, LayoutDashboard, Loader2, MessagesSquare, RotateCcw, Smartphone, Waves, Zap } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, useHealth, useJobState, usePoll, type Api } from '../api'
 import { StatusBadge } from '../StatusBadge'
@@ -12,10 +12,10 @@ import { Timeline } from './Timeline'
 import { usePacedEvents } from './usePacedEvents'
 import './dashboard.css'
 
-type View = 'overview' | 'schedule' | 'chat'
+type View = 'overview' | 'chat'
 const viewFromUrl = (): View => {
   const v = new URLSearchParams(window.location.search).get('view')
-  return v === 'chat' || v === 'schedule' ? v : 'overview'
+  return v === 'chat' ? 'chat' : 'overview'
 }
 
 const FRIENDLY: Partial<Record<ErrorCode, string>> = {
@@ -180,10 +180,7 @@ export function Dashboard({ api }: { api: Api }) {
 
       <nav className="tabs" role="tablist" aria-label="Dashboard view">
         <button role="tab" aria-selected={view === 'overview'} className={view === 'overview' ? 'on' : ''} onClick={() => setView('overview')}>
-          <LayoutDashboard size={15} /> Overview
-        </button>
-        <button role="tab" aria-selected={view === 'schedule'} className={view === 'schedule' ? 'on' : ''} onClick={() => setView('schedule')}>
-          <CalendarClock size={15} /> Schedule
+          <LayoutDashboard size={15} /> Graph &amp; data
         </button>
         <button role="tab" aria-selected={view === 'chat'} className={view === 'chat' ? 'on' : ''} onClick={() => setView('chat')}>
           <MessagesSquare size={15} /> Conversation
@@ -205,16 +202,6 @@ export function Dashboard({ api }: { api: Api }) {
                 onFlatChange={setFlat}
                 tariffBusy={pending === 'tariff' || running || api.mode === 'sample'}
               />
-              <HomeCards state={s} />
-            </>
-          )}
-        </div>
-      )}
-      {view === 'schedule' && (
-        <div className="dash-view">
-          {s && (
-            <>
-              <MetricTiles state={s} />
               <Timeline state={s} />
               <HomeCards state={s} />
             </>
