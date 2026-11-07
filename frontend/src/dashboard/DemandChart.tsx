@@ -1,6 +1,6 @@
-// Street demand over the evening: preferred times, optional cheap timer, coordinated plan,
-// the shared limit, and shading for expensive hours (PRD §17).
-import { useMemo, useState } from 'react'
+// Street demand tonight (PRD §17): a focus line chosen by the segmented control, the preferred-times
+// baseline as a dashed reference, the shared limit, over-limit fill, and expensive-hour shading.
+import { useEffect, useMemo, useState } from 'react'
 import {
   Area,
   CartesianGrid,
@@ -14,26 +14,25 @@ import {
   YAxis,
 } from 'recharts'
 import { SLOTS, slotToTick, slotToTime } from '../time'
-import type { NeighborhoodState } from '../types'
+import type { NeighborhoodState, ScheduleKind, Task } from '../types'
 import { kw } from './format'
 
-// Validated (dataviz validate_palette.js, dark, surface #111c33): all checks pass.
-export const SERIES = {
-  baseline: { label: 'Everyone at preferred times', color: '#d95926', dash: undefined },
-  independent: { label: 'Everyone uses a cheap timer', color: '#199e70', dash: '6 4' },
-  coordinated: { label: 'Coordinated plan', color: '#3987e5', dash: undefined },
-} as const
+const LABEL: Record<ScheduleKind, string> = {
+  baseline: 'Preferred times',
+  independent: 'Cheap timer',
+  coordinated: 'Coordinated',
+}
+const FOCUS = '#2f5d46'
+const REF = '#9aa39c'
+const LIMIT = '#c8553d'
 
-type Row = {
-  slot: number
-  baseline: number | null
-  independent: number | null
-  coordinated: number | null
-  over: [number, number]
+/** The part of the night where appliances can run: up to the latest deadline (at least 6:00 AM), on a 2-hour tick. */
+export function windowEnd(tasks: Task[]): number {
+  return Math.min(SLOTS, Math.ceil(Math.max(48, ...tasks.map((t) => t.deadline_slot)) / 8) * 8)
 }
 
 /** Contiguous runs of slots priced above the cheapest rate. Empty under a flat tariff. */
-function expensiveRuns(prices: number[]): [number, number][] {
+export function expensiveRuns(prices: number[]): [number, number][] {
   if (prices.length === 0) return []
   const min = Math.min(...prices)
   const runs: [number, number][] = []
@@ -49,112 +48,99 @@ function expensiveRuns(prices: number[]): [number, number][] {
   return runs
 }
 
-export function DemandChart({ state }: { state: NeighborhoodState }) {
-  const [showTimer, setShowTimer] = useState(true)
+export function DemandChart({ state, onFlatChange, tariffBusy }: {
+  state: NeighborhoodState
+  onFlatChange: (flat: boolean) => void
+  tariffBusy: boolean
+}) {
+  const hasPlan = !!state.demand_kw.coordinated
+  const [focus, setFocus] = useState<ScheduleKind>(hasPlan ? 'coordinated' : 'baseline')
+  useEffect(() => {
+    // Jump to the coordinated view when a plan first commits; back to preferred after a reset.
+    setFocus(hasPlan ? 'coordinated' : 'baseline')
+  }, [hasPlan])
+
   const cap = state.capacity_kw
   const d = state.demand_kw
-  const hasPlan = !!d.coordinated
+  const xEnd = windowEnd(state.tasks)
 
-  const rows = useMemo<Row[]>(() => {
+  const rows = useMemo(() => {
     const at = (arr: number[] | null | undefined, s: number) => (arr ? arr[Math.min(s, SLOTS - 1)] : null)
-    // One extra point at slot 96 closes the final step.
     return Array.from({ length: SLOTS + 1 }, (_, s) => {
-      const b = at(d.baseline, s) ?? 0
+      const f = at(d[focus], s)
       return {
         slot: s,
+        focus: f,
         baseline: at(d.baseline, s),
-        independent: at(d.independent, s),
-        coordinated: at(d.coordinated, s),
-        over: [cap, Math.max(cap, b)],
+        over: [cap, Math.max(cap, f ?? 0)] as [number, number],
       }
     })
-  }, [d.baseline, d.independent, d.coordinated, cap])
+  }, [d, focus, cap])
 
   const runs = useMemo(() => expensiveRuns(state.tariff_usd_per_kwh), [state.tariff_usd_per_kwh])
-  const yMax = Math.ceil(Math.max(cap + 3, ...rows.map((r) => Math.max(r.baseline ?? 0, r.independent ?? 0))) / 5) * 5
+  const peakAll = Math.max(cap, ...(d.baseline ?? []), ...(d.independent ?? []))
+  const yMax = Math.ceil((peakAll + 2) / 5) * 5
   const yTicks = Array.from({ length: yMax / 5 + 1 }, (_, i) => i * 5)
-  // Zoom to the part of the night where appliances can run: up to the latest deadline
-  // (at least 6:00 AM), rounded to a 2-hour tick. After that it's only always-on use.
-  const xEnd = Math.min(SLOTS, Math.ceil(Math.max(48, ...state.tasks.map((t) => t.deadline_slot)) / 8) * 8)
   const xTicks = Array.from({ length: xEnd / 8 + 1 }, (_, i) => i * 8)
-
-  const visible = (['baseline', 'independent', 'coordinated'] as const).filter(
-    (k) => (k !== 'independent' || showTimer) && (k !== 'coordinated' || hasPlan),
-  )
+  const anyOver = rows.some((r) => (r.focus ?? 0) > cap + 1e-6)
+  const peakPrice = Math.max(...state.tariff_usd_per_kwh)
 
   return (
     <section className="card chart-card">
-      <div className="chart-head">
-        <h2>
-          Street demand tonight <span className="muted chart-sub">· {state.tariff_label}</span>
-        </h2>
-        <ul className="legend" aria-label="Legend">
-          {visible.map((k) => (
-            <li key={k}>
-              <svg width="22" height="8" aria-hidden>
-                <line x1="1" y1="4" x2="21" y2="4" stroke={SERIES[k].color} strokeWidth="2"
-                  strokeDasharray={SERIES[k].dash} strokeLinecap="round" />
-              </svg>
-              {SERIES[k].label}
-            </li>
+      <div className="card-head">
+        <div>
+          <div className="eyebrow">Demand tonight</div>
+          <h2>Peak, meet a better plan.</h2>
+        </div>
+        <div className="segmented" role="tablist" aria-label="Schedule">
+          {(['baseline', 'independent', 'coordinated'] as const).map((k) => (
+            <button key={k} role="tab" aria-selected={focus === k} className={focus === k ? 'on' : ''}
+              disabled={!d[k]} onClick={() => setFocus(k)} title={!d[k] ? 'Not planned yet' : undefined}>
+              {LABEL[k]}
+            </button>
           ))}
-          <li>
-            <svg width="22" height="8" aria-hidden>
-              <line x1="1" y1="4" x2="21" y2="4" stroke="var(--fg)" strokeWidth="1.5" strokeDasharray="3 3" />
-            </svg>
-            {cap} kW street limit
-          </li>
-          {runs.length > 0 && (
-            <li><span className="swatch-peak" aria-hidden /> Expensive hours</li>
+        </div>
+      </div>
+
+      <div className="legend-row">
+        <ul className="legend">
+          <li><svg width="22" height="8" aria-hidden><line x1="1" y1="4" x2="21" y2="4" stroke={FOCUS} strokeWidth="2.5" strokeLinecap="round" /></svg>{LABEL[focus]}</li>
+          {focus !== 'baseline' && (
+            <li><svg width="22" height="8" aria-hidden><line x1="1" y1="4" x2="21" y2="4" stroke={REF} strokeWidth="1.5" strokeDasharray="4 3" /></svg>Preferred-times baseline</li>
           )}
-          {!hasPlan && <li className="muted">Coordinated plan: not planned yet</li>}
+          <li><svg width="22" height="8" aria-hidden><line x1="1" y1="4" x2="21" y2="4" stroke={LIMIT} strokeWidth="1.5" strokeDasharray="5 4" /></svg>{cap} kW shared limit</li>
+          {anyOver && <li><span className="swatch swatch-over" aria-hidden />Over the limit</li>}
         </ul>
-        <label className="toggle">
-          <input type="checkbox" checked={showTimer} onChange={(e) => setShowTimer(e.target.checked)} />
-          Show cheap timer
+        <label className="check" title="Changes the prices the planner, agents, and metrics use (POST /api/tariff)">
+          <input type="checkbox" checked={state.tariff_mode === 'flat'} disabled={tariffBusy}
+            onChange={(e) => onFlatChange(e.target.checked)} />
+          Flat-rate control
         </label>
       </div>
 
       <div className="chart-box">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
-            <CartesianGrid stroke="var(--grid)" vertical={false} />
+          <ComposedChart data={rows} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
+            <CartesianGrid stroke="#eceee8" vertical={false} />
             {runs.map(([a, b]) => (
-              <ReferenceArea key={a} x1={a} x2={b} fill="var(--peak-shade)" fillOpacity={1} stroke="none" ifOverflow="hidden" />
+              <ReferenceArea key={a} x1={a} x2={b} fill="#fbe9df" fillOpacity={0.75} stroke="none" ifOverflow="hidden" />
             ))}
-            <XAxis
-              dataKey="slot"
-              type="number"
-              domain={[0, xEnd]}
-              ticks={xTicks}
-              allowDataOverflow
-              tickFormatter={slotToTick}
-              stroke="var(--muted)"
-              tick={{ fill: 'var(--muted)', fontSize: 12 }}
-              tickLine={false}
-            />
-            <YAxis
-              domain={[0, yMax]}
-              ticks={yTicks}
-              tickFormatter={(v: number) => `${v} kW`}
-              stroke="var(--muted)"
-              tick={{ fill: 'var(--muted)', fontSize: 12 }}
-              tickLine={false}
-              axisLine={false}
-              width={56}
-            />
-            {/* Over-limit area under preferred times: always visible. */}
-            <Area dataKey="over" type="stepAfter" stroke="none" fill={SERIES.baseline.color} fillOpacity={0.28}
+            <XAxis dataKey="slot" type="number" domain={[0, xEnd]} ticks={xTicks} allowDataOverflow
+              tickFormatter={slotToTick} stroke="#cfd4ca" tick={{ fill: '#7a847d', fontSize: 12 }} tickLine={false} />
+            <YAxis domain={[0, yMax]} ticks={yTicks} tickFormatter={(v: number) => `${v} kW`}
+              tick={{ fill: '#7a847d', fontSize: 12 }} tickLine={false} axisLine={false} width={52} />
+            <Area dataKey="over" type="stepAfter" stroke="none" fill={LIMIT} fillOpacity={0.16}
               isAnimationActive={false} activeDot={false} />
-            <ReferenceLine y={cap} stroke="var(--fg)" strokeDasharray="3 3" strokeWidth={1.5}
-              label={{ value: `${cap} kW limit`, position: 'insideTopRight', fill: 'var(--fg)', fontSize: 12 }} />
-            {visible.map((k) => (
-              <Line key={k} dataKey={k} type="stepAfter" stroke={SERIES[k].color} strokeWidth={2}
-                strokeDasharray={SERIES[k].dash} dot={false} isAnimationActive={false}
-                activeDot={{ r: 4, stroke: 'var(--card)', strokeWidth: 2 }} />
-            ))}
+            {focus !== 'baseline' && (
+              <Line dataKey="baseline" type="stepAfter" stroke={REF} strokeWidth={1.5} strokeDasharray="4 3"
+                dot={false} activeDot={false} isAnimationActive={false} />
+            )}
+            <ReferenceLine y={cap} stroke={LIMIT} strokeDasharray="5 4" strokeWidth={1.5}
+              label={{ value: `${cap} kW shared limit`, position: 'insideTopRight', fill: LIMIT, fontSize: 12 }} />
+            <Line dataKey="focus" type="stepAfter" stroke={FOCUS} strokeWidth={2.5} dot={false}
+              isAnimationActive={false} activeDot={{ r: 4, stroke: '#fff', strokeWidth: 2 }} />
             <Tooltip
-              cursor={{ stroke: 'var(--muted)', strokeWidth: 1 }}
+              cursor={{ stroke: '#9aa39c', strokeWidth: 1 }}
               content={({ active, label }) => {
                 const s = typeof label === 'number' ? Math.min(label, SLOTS - 1) : null
                 if (!active || s === null) return null
@@ -162,22 +148,25 @@ export function DemandChart({ state }: { state: NeighborhoodState }) {
                 return (
                   <div className="tip">
                     <div className="tip-time">{slotToTime(s)}–{slotToTime(s + 1)}</div>
-                    {visible.map((k) => (
-                      <div key={k} className="tip-row">
-                        <span className="tip-key" style={{ background: SERIES[k].color }} />
-                        <span>{SERIES[k].label}</span>
-                        <b>{r[k] === null ? '—' : kw(r[k]!)}</b>
-                      </div>
-                    ))}
-                    <div className="tip-foot">
-                      ${state.tariff_usd_per_kwh[s]?.toFixed(2)}/kWh · limit {cap} kW
-                    </div>
+                    <div className="tip-row"><span className="tip-key" style={{ background: FOCUS }} />{LABEL[focus]}<b>{r.focus === null ? '—' : kw(r.focus)}</b></div>
+                    {focus !== 'baseline' && (
+                      <div className="tip-row"><span className="tip-key" style={{ background: REF }} />Preferred times<b>{r.baseline === null ? '—' : kw(r.baseline)}</b></div>
+                    )}
+                    <div className="tip-foot">${state.tariff_usd_per_kwh[s]?.toFixed(2)}/kWh · limit {cap} kW</div>
                   </div>
                 )
               }}
             />
           </ComposedChart>
         </ResponsiveContainer>
+      </div>
+      <div className="chart-foot">
+        {runs.length > 0 ? (
+          <span><span className="swatch swatch-peak" aria-hidden /> Shaded = expensive hours, ${peakPrice.toFixed(2)}/kWh</span>
+        ) : (
+          <span>Flat rate: every hour costs the same, so moving appliances can't change the bill.</span>
+        )}
+        <span>All demand is modeled.</span>
       </div>
     </section>
   )

@@ -1,73 +1,72 @@
+import { CircleCheck, DollarSign, Gauge, Zap, type LucideIcon } from 'lucide-react'
 import type { Metrics, NeighborhoodState } from '../types'
 import { kw, kwh, usd, usdDelta } from './format'
 
-type Pick = (m: Metrics) => number
-
 interface TileSpec {
+  key: string
   title: string
-  value: Pick
+  Icon: LucideIcon
+  tint: string
+  value: (m: Metrics) => number
   fmt: (n: number) => string
-  delta?: (after: number, before: number) => string
-  note?: string
+  sub: (head: Metrics, base: Metrics | null) => string
+  baseLabel: (base: Metrics) => string
 }
 
 export function MetricTiles({ state }: { state: NeighborhoodState }) {
   const { baseline, independent, coordinated } = state.metrics
   const cap = state.capacity_kw
+    const head = coordinated ?? null
 
   const tiles: TileSpec[] = [
-    { title: 'Energy charge', value: (m) => m.variable_cost_usd, fmt: usd, delta: usdDelta },
     {
-      title: 'Peak street demand',
-      value: (m) => m.peak_kw,
-      fmt: kw,
-      delta: (a, b) => (Math.abs(a - b) < 0.05 ? 'no change' : `${a < b ? '−' : '+'}${Math.abs(a - b).toFixed(1)} kW`),
+      key: 'cost', title: state.tariff_mode === 'flat' ? 'Flat-rate charge' : 'Energy charge', Icon: DollarSign, tint: 'tint-green',
+      value: (m) => m.variable_cost_usd, fmt: usd,
+      sub: (h, b) => (b ? `${usdDelta(h.variable_cost_usd, b.variable_cost_usd)} vs. preferred times` : ''),
+      baseLabel: (b) => `Preferred ${usd(b.variable_cost_usd)} · Timer ${independent ? usd(independent.variable_cost_usd) : '—'}`,
     },
-    { title: 'Energy used', value: (m) => m.energy_kwh, fmt: kwh, note: 'Moving appliances never changes it.' },
     {
-      title: 'Appliances done on time',
-      value: (m) => m.tasks_completed,
-      fmt: (n) => `${n} of ${baseline?.tasks_total ?? coordinated?.tasks_total ?? 6}`,
+      key: 'peak', title: 'Street peak', Icon: Gauge, tint: 'tint-blue',
+      value: (m) => m.peak_kw, fmt: kw,
+      sub: (h, b) => (b ? `−${(b.peak_kw - h.peak_kw).toFixed(1)} kW vs. preferred times` : ''),
+      baseLabel: (b) => `Preferred ${kw(b.peak_kw)} · Timer ${independent ? kw(independent.peak_kw) : '—'}`,
+    },
+    {
+      key: 'energy', title: 'Energy used', Icon: Zap, tint: 'tint-amber',
+      value: (m) => m.energy_kwh, fmt: kwh,
+      sub: () => 'Same appliances, same energy.',
+      baseLabel: (b) => `Preferred ${kwh(b.energy_kwh)} · same`,
+    },
+    {
+      key: 'done', title: 'Done on time', Icon: CircleCheck, tint: 'tint-violet',
+      value: (m) => m.tasks_completed, fmt: (n) => `${n} / ${head?.tasks_total ?? baseline?.tasks_total ?? 6}`,
+      sub: (h) => (h.capacity_violations === 0 ? `Under ${cap} kW all night · validated` : `${h.capacity_violations} periods over the limit`),
+      baseLabel: (b) => `Preferred: ${b.capacity_violations} periods over limit`,
     },
   ]
 
   return (
     <section className="tiles" aria-label="Metrics">
-      {tiles.map((t) => {
-        const head = coordinated ?? null
-        return (
-          <div key={t.title} className="tile">
-            <div className="tile-title">{t.title}</div>
-            <div className="tile-value">
-              {head ? t.fmt(t.value(head)) : <span className="muted">Not planned yet</span>}
-            </div>
-            {head && baseline && t.delta && (
-              <div className="tile-delta">{t.delta(t.value(head), t.value(baseline))} vs. preferred times</div>
-            )}
-            <dl className="tile-compare">
-              {baseline && (
-                <div>
-                  <dt>Preferred times</dt>
-                  <dd>
-                    {t.fmt(t.value(baseline))}
-                    {t.title === 'Peak street demand' && baseline.peak_kw > cap && <span className="over"> over limit</span>}
-                  </dd>
-                </div>
-              )}
-              {independent && (
-                <div>
-                  <dt>Cheap timer</dt>
-                  <dd>
-                    {t.fmt(t.value(independent))}
-                    {t.title === 'Peak street demand' && independent.peak_kw > cap && <span className="over"> over limit</span>}
-                  </dd>
-                </div>
-              )}
-            </dl>
-            {t.note && <div className="tile-note muted">{t.note}</div>}
+      {tiles.map((t) => (
+        <div key={t.key} className="tile">
+          <div className="tile-head">
+            <span className={`tile-icon ${t.tint}`}><t.Icon size={16} /></span>
+            <span className="tile-title">{t.title}</span>
           </div>
-        )
-      })}
+          {head ? (
+            <>
+              <div className="tile-value">{t.fmt(t.value(head))}</div>
+              <div className="tile-sub">{t.sub(head, baseline ?? null)}</div>
+            </>
+          ) : baseline ? (
+            <>
+              <div className="tile-value tile-value-muted">{t.fmt(t.value(baseline))}</div>
+              <div className="tile-sub">Preferred times · not coordinated</div>
+            </>
+          ) : null}
+          {head && baseline && <div className="tile-base">{t.baseLabel(baseline)}</div>}
+        </div>
+      ))}
     </section>
   )
 }
