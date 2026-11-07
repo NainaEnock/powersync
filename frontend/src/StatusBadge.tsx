@@ -8,25 +8,27 @@ export function StatusBadge({ api, health }: { api: Api; health: Polled<Health> 
   const h = health.data
   const connected = !!h && !health.error
   const AuthIcon = h?.auth_mode === 'enforced' ? ShieldCheck : h?.auth_mode === 'partial' ? Shield : ShieldOff
+  const live = h?.agent_impl?.coordinate === 'live'
 
   return (
     <div className="status-badge" role="status" aria-live="polite">
       <span className={`pill ${api.mode === 'sample' ? 'pill-warn' : 'pill-ok'}`}>
-        <Database size={14} /> {api.mode === 'sample' ? 'Sample data' : 'Live'}
+        <Database size={13} /> {api.mode === 'sample' ? 'Sample data' : 'Live data'}
       </span>
       <span className={`pill ${connected ? 'pill-ok' : 'pill-bad'}`}>
-        {connected ? <PlugZap size={14} /> : <Plug size={14} />}
-        {connected ? 'Connected' : (health.error?.message ?? 'Connecting…')}
+        {connected ? <PlugZap size={13} /> : <Plug size={13} />}
+        {connected ? 'Backend connected' : (health.error?.message ?? 'Connecting…')}
       </span>
       {connected && h && (
         <span className={`pill ${h.auth_mode === 'enforced' ? 'pill-ok' : 'pill-warn'}`}>
-          <AuthIcon size={14} /> {h.auth_mode}
+          <AuthIcon size={13} /> {h.auth_mode}
         </span>
       )}
       {connected && h && (
-        <span className={`pill ${h.openrouter_configured ? '' : 'pill-warn'}`} title="AI model from /api/health">
-          <Cpu size={14} /> {h.openrouter_configured ? (h.model ?? 'model not set') : 'AI not configured'}
-          {h.agent_impl?.coordinate === 'stub' ? ' (stub agent)' : ''}
+        <span className={`pill ${h.openrouter_configured && live ? '' : 'pill-warn'}`} title="AI model from /api/health">
+          <Cpu size={13} />
+          {!h.openrouter_configured ? 'AI not configured' : (h.model ?? 'model not set')}
+          {h.openrouter_configured && !live ? ' · stub agent' : ''}
         </span>
       )}
     </div>
