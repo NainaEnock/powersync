@@ -1,8 +1,12 @@
-// PowerSync household phone app (PRD §16). Default export, injected props:
-//   homeId — which household this phone is (null shows the picker)
-//   state  — GET /api/state?home=<homeId>, already filtered by the server
-//   api    — B's adapter (see phoneTypes.ts PhoneApi)
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+// PowerSync household phone app (PRD §16).
+//
+//   <PhoneApp homeId={homeId} api={api} />            phone polls its own state
+//   <PhoneApp homeId={homeId} api={api} state={polled} />  or B passes usePoll() output
+//
+// homeId comes from /phone?home=X (B's App.tsx). If null, the phone uses the
+// household last chosen on this device, or shows the picker.
+// State is GET /api/state?home=X, already filtered by the server (PRD §11.3).
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   AlertTriangle,
   BatteryCharging,
@@ -19,26 +23,21 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import './phone.css';
-import {
-  applianceNoun,
-  editFieldPhrase,
-  formatKwh,
-  formatUsd,
-  slotToTime,
-} from './format';
-import { errorText, usePhoneFlow, type FlowState } from './usePhoneFlow';
+import { getToken, setToken, useHealth, usePoll, type Api, type Polled } from '../api';
+import { StatusBadge } from '../StatusBadge';
+import { slotToTime } from '../time';
 import {
   HOME_IDS,
   type AgentEvent,
   type HomeId,
-  type HouseholdState,
+  type NeighborhoodState,
   type PendingChange,
-  type PhoneApi,
-  type PhoneAppProps,
   type ScheduleEntry,
   type Task,
-} from './phoneTypes';
+} from '../types';
+import { applianceNoun, editFieldPhrase, formatKwh, formatUsd } from './format';
+import { errorText, usePhoneFlow, type FlowState } from './usePhoneFlow';
+import './phone.css';
 
 const SUGGESTIONS: Record<HomeId, string[]> = {
   A: ['I leave at 11 pm tonight. Have my car ready by then.', 'Car ready by 8 pm'],
@@ -48,25 +47,111 @@ const SUGGESTIONS: Record<HomeId, string[]> = {
 
 const FALLBACK_COLORS: Record<HomeId, string> = { A: '#2563eb', B: '#d97706', C: '#059669' };
 
-export default function PhoneApp({ homeId, state, api }: PhoneAppProps) {
-  const [showTokenEntry, setShowTokenEntry] = useState(false);
-  const { flow, busy, send, act, dismiss } = usePhoneFlow(homeId, state, api);
+// ---------- which household this device is ----------
 
-  const authError = flow.error?.code ?? api.stateError?.code ?? null;
+const HOME_KEY = 'powersync.phone.home';
+
+function storedHome(): HomeId | null {
+  try {
+    const v = localStorage.getItem(HOME_KEY);
+    return HOME_IDS.includes(v as HomeId) ? (v as HomeId) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberHome(home: HomeId | null) {
+  try {
+    if (home) localStorage.setItem(HOME_KEY, home);
+    else localStorage.removeItem(HOME_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  // Keep a ?home= pin in step so a reload shows the same household. Other params (?mode=) stay.
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('home')) {
+    if (home) url.searchParams.set('home', home);
+    else url.searchParams.delete('home');
+    window.history.replaceState(null, '', url.toString());
+  }
+}
+
+export interface PhoneAppProps {
+  homeId: HomeId | null;
+  api: Api;
+  /** Optional: B's usePoll(api.state(homeId)) result. If omitted the phone polls itself. */
+  state?: Polled<NeighborhoodState>;
+}
+
+export default function PhoneApp({ homeId, api, state }: PhoneAppProps) {
+  const [chosen, setChosen] = useState<HomeId | null>(() => homeId ?? storedHome());
+  useEffect(() => {
+    if (homeId) setChosen(homeId);
+  }, [homeId]);
+
+  const changeHome = useCallback((h: HomeId | null) => {
+    rememberHome(h);
+    setChosen(h);
+  }, []);
+
+  if (!chosen) {
+    return (
+      <Shell>
+        <HouseholdPicker onPick={changeHome} />
+      </Shell>
+    );
+  }
+  return state ? (
+    <PhoneHome key={chosen} homeId={chosen} api={api} polled={state} onChangeHome={changeHome} />
+  ) : (
+    <PolledPhoneHome key={chosen} homeId={chosen} api={api} onChangeHome={changeHome} />
+  );
+}
+
+function PolledPhoneHome(props: { homeId: HomeId; api: Api; onChangeHome: (h: HomeId | null) => void }) {
+  const { api, homeId } = props;
+  const polled = usePoll((signal) => api.state(homeId, signal), [api, homeId]);
+  return <PhoneHome {...props} polled={polled} />;
+}
+
+function PhoneHome({
+  homeId,
+  api,
+  polled,
+  onChangeHome,
+}: {
+  homeId: HomeId;
+  api: Api;
+  polled: Polled<NeighborhoodState>;
+  onChangeHome: (h: HomeId | null) => void;
+}) {
+  const health = useHealth(api);
+  const state = polled.data;
+  const { flow, busy, send, act, dismiss } = usePhoneFlow(api, homeId, state, polled.refresh);
+  const [showTokenEntry, setShowTokenEntry] = useState(false);
+
+  const authError = flow.error?.code ?? polled.error?.code ?? null;
   const needsToken = authError === 'UNAUTHORIZED';
   const forbidden = authError === 'FORBIDDEN';
+  const down = polled.error?.code === 'BACKEND_DOWN' || polled.error?.code === 'NETWORK';
 
   useEffect(() => {
     if (needsToken) setShowTokenEntry(true);
   }, [needsToken]);
 
-  if (!homeId) {
-    return (
-      <Shell>
-        <HouseholdPicker api={api} />
-      </Shell>
-    );
-  }
+  const tokenSheet = showTokenEntry && (
+    <TokenEntry
+      homeId={homeId}
+      onSave={(code) => {
+        setToken(homeId, code);
+        setShowTokenEntry(false);
+        dismiss();
+        polled.refresh();
+      }}
+      onCancel={() => setShowTokenEntry(false)}
+      onChangeHome={() => onChangeHome(null)}
+    />
+  );
 
   if (forbidden) {
     return (
@@ -78,13 +163,11 @@ export default function PhoneApp({ homeId, state, api }: PhoneAppProps) {
           <button className="ps-btn ps-primary" onClick={() => setShowTokenEntry(true)}>
             Enter the code again
           </button>
-          <button className="ps-btn" onClick={() => api.setHome(null)}>
+          <button className="ps-btn" onClick={() => onChangeHome(null)}>
             Change household
           </button>
         </div>
-        {showTokenEntry && (
-          <TokenEntry homeId={homeId} api={api} onDone={() => { setShowTokenEntry(false); dismiss(); }} />
-        )}
+        {tokenSheet}
       </Shell>
     );
   }
@@ -94,22 +177,43 @@ export default function PhoneApp({ homeId, state, api }: PhoneAppProps) {
 
   return (
     <Shell color={color}>
-      <Header homeId={homeId} homeName={home?.name} state={state} api={api} onCode={() => setShowTokenEntry(true)} />
+      <header className="ps-header">
+        <div className="ps-header-top">
+          <div className="ps-home-dot" aria-hidden />
+          <div className="ps-header-title">
+            <h1>{home?.name || `Home ${homeId}`}</h1>
+            <span className="ps-sub">PowerSync{state ? ` · Plan revision ${state.revision}` : ''}</span>
+          </div>
+          <button className="ps-icon-btn" onClick={() => setShowTokenEntry(true)} aria-label="Household code">
+            <KeyRound aria-hidden />
+          </button>
+        </div>
+        <StatusBadge api={api} health={health} />
+        {!getToken(homeId) && health.data && health.data.auth_mode !== 'dev-open' && (
+          <button className="ps-link" onClick={() => setShowTokenEntry(true)}>
+            This phone has no household code. Enter it.
+          </button>
+        )}
+      </header>
 
-      {showTokenEntry && (
-        <TokenEntry homeId={homeId} api={api} onDone={() => { setShowTokenEntry(false); dismiss(); }} />
+      {tokenSheet}
+
+      {api.mode === 'sample' && (
+        <div className="ps-banner ps-banner-sample">
+          Sample data. Requests need the live backend (add ?mode=live).
+        </div>
       )}
 
-      {api.connection === 'backend_down' && (
+      {down && (
         <div className="ps-banner ps-banner-error" role="alert">
-          <WifiOff aria-hidden /> Backend not running on port 8000. {state ? 'Showing the last plan received.' : ''}
+          <WifiOff aria-hidden /> {polled.error?.message}. {state ? 'Showing the last plan received.' : ''}
         </div>
       )}
 
       {!state ? (
         <div className="ps-card ps-center">
           <Loader2 className="ps-spin" aria-hidden />
-          <p>{api.connection === 'backend_down' ? 'Waiting for the backend…' : 'Loading your plan…'}</p>
+          <p>{down ? 'Waiting for the backend…' : polled.error ? errorText(polled.error) : 'Loading your plan…'}</p>
         </div>
       ) : (
         <>
@@ -120,7 +224,7 @@ export default function PhoneApp({ homeId, state, api }: PhoneAppProps) {
           )}
           <SummaryTiles homeId={homeId} state={state} />
           <PlanCard homeId={homeId} state={state} replanning={busy && flow.kind === 'action'} />
-          <ChangeCards homeId={homeId} state={state} flow={flow} busy={busy} onAct={act} />
+          <ChangeCards homeId={homeId} state={state} busy={busy} onAct={act} />
           <FlowStatus flow={flow} onDismiss={dismiss} />
           <RequestBox homeId={homeId} busy={busy} onSend={send} />
           <Messages homeId={homeId} state={state} />
@@ -138,57 +242,9 @@ function Shell({ children, color }: { children: ReactNode; color?: string }) {
   );
 }
 
-/* ---------------- header ---------------- */
-
-function Header({
-  homeId,
-  homeName,
-  state,
-  api,
-  onCode,
-}: {
-  homeId: HomeId;
-  homeName?: string;
-  state: HouseholdState | null;
-  api: PhoneApi;
-  onCode: () => void;
-}) {
-  const conn =
-    api.connection === 'connected'
-      ? 'connected'
-      : api.connection === 'connecting'
-        ? 'connecting'
-        : api.connection === 'backend_down'
-          ? 'backend down'
-          : 'error';
-  const sample = api.dataMode === 'sample';
-  return (
-    <header className="ps-header">
-      <div className="ps-header-top">
-        <div className="ps-home-dot" aria-hidden />
-        <div className="ps-header-title">
-          <h1>{homeName || `Home ${homeId}`}</h1>
-          <span className="ps-sub">PowerSync{state ? ` · Plan revision ${state.revision}` : ''}</span>
-        </div>
-        <button className="ps-icon-btn" onClick={onCode} aria-label="Household code">
-          <KeyRound aria-hidden />
-        </button>
-      </div>
-      <div className="ps-badges">
-        <span className={`ps-badge ${sample ? 'ps-badge-sample' : 'ps-badge-live'}`}>
-          {sample ? 'Sample data' : 'Live'}
-        </span>
-        <span className={`ps-badge ${api.connection === 'connected' ? 'ps-badge-ok' : 'ps-badge-bad'}`}>{conn}</span>
-        <span className="ps-badge">{api.authMode === 'unknown' ? 'auth ?' : api.authMode}</span>
-        {!api.hasToken(homeId) && api.authMode !== 'dev-open' && <span className="ps-badge ps-badge-bad">no code</span>}
-      </div>
-    </header>
-  );
-}
-
 /* ---------------- household picker + token entry ---------------- */
 
-function HouseholdPicker({ api }: { api: PhoneApi }) {
+function HouseholdPicker({ onPick }: { onPick: (h: HomeId) => void }) {
   return (
     <div className="ps-card">
       <h1 className="ps-brand">
@@ -201,7 +257,7 @@ function HouseholdPicker({ api }: { api: PhoneApi }) {
             key={h}
             className="ps-btn ps-picker-btn"
             style={{ '--ps-home': FALLBACK_COLORS[h] } as CSSProperties}
-            onClick={() => api.setHome(h)}
+            onClick={() => onPick(h)}
           >
             Home {h}
           </button>
@@ -212,7 +268,17 @@ function HouseholdPicker({ api }: { api: PhoneApi }) {
   );
 }
 
-function TokenEntry({ homeId, api, onDone }: { homeId: HomeId; api: PhoneApi; onDone: () => void }) {
+function TokenEntry({
+  homeId,
+  onSave,
+  onCancel,
+  onChangeHome,
+}: {
+  homeId: HomeId;
+  onSave: (code: string) => void;
+  onCancel: () => void;
+  onChangeHome: () => void;
+}) {
   const [code, setCode] = useState('');
   return (
     <div className="ps-overlay" role="dialog" aria-modal="true" aria-label="Household code">
@@ -220,9 +286,7 @@ function TokenEntry({ homeId, api, onDone }: { homeId: HomeId; api: PhoneApi; on
         className="ps-card ps-sheet"
         onSubmit={(e) => {
           e.preventDefault();
-          api.setToken(homeId, code);
-          api.refresh().catch(() => undefined);
-          onDone();
+          if (code.trim()) onSave(code.trim());
         }}
       >
         <h2>
@@ -243,11 +307,11 @@ function TokenEntry({ homeId, api, onDone }: { homeId: HomeId; api: PhoneApi; on
           <button type="submit" className="ps-btn ps-primary" disabled={!code.trim()}>
             Save code
           </button>
-          <button type="button" className="ps-btn" onClick={onDone}>
+          <button type="button" className="ps-btn" onClick={onCancel}>
             Cancel
           </button>
         </div>
-        <button type="button" className="ps-link" onClick={() => api.setHome(null)}>
+        <button type="button" className="ps-link" onClick={onChangeHome}>
           Change household
         </button>
       </form>
@@ -257,7 +321,7 @@ function TokenEntry({ homeId, api, onDone }: { homeId: HomeId; api: PhoneApi; on
 
 /* ---------------- summary tiles ---------------- */
 
-function currentSchedule(state: HouseholdState): { entries: ScheduleEntry[]; coordinated: boolean } {
+function currentSchedule(state: NeighborhoodState): { entries: ScheduleEntry[]; coordinated: boolean } {
   if (state.coordinated_schedule) return { entries: state.coordinated_schedule, coordinated: true };
   return { entries: state.baseline_schedule ?? [], coordinated: false };
 }
@@ -266,7 +330,7 @@ function onTime(entry: ScheduleEntry | undefined, task: Task): boolean {
   return !!entry && entry.start_slot + entry.duration_slots <= task.deadline_slot;
 }
 
-function SummaryTiles({ homeId, state }: { homeId: HomeId; state: HouseholdState }) {
+function SummaryTiles({ homeId, state }: { homeId: HomeId; state: NeighborhoodState }) {
   const { entries, coordinated } = currentSchedule(state);
   const metrics = coordinated ? state.metrics.coordinated : state.metrics.baseline;
   const mine = metrics?.per_home?.[homeId];
@@ -302,10 +366,10 @@ function TaskIcon({ name }: { name: string }) {
   return <BatteryCharging aria-hidden />;
 }
 
-function PlanCard({ homeId, state, replanning }: { homeId: HomeId; state: HouseholdState; replanning: boolean }) {
+function PlanCard({ homeId, state, replanning }: { homeId: HomeId; state: NeighborhoodState; replanning: boolean }) {
   const { entries, coordinated } = currentSchedule(state);
   const tasks = state.tasks.filter((t) => t.home_id === homeId);
-  const t = (slot: number) => slotToTime(slot, state.horizon_start, state.slot_minutes);
+  const t = slotToTime;
   return (
     <section className="ps-card">
       <div className="ps-card-head">
@@ -366,13 +430,11 @@ function changeQuestion(change: PendingChange, tasks: Task[]): string {
 function ChangeCards({
   homeId,
   state,
-  flow,
   busy,
   onAct,
 }: {
   homeId: HomeId;
-  state: HouseholdState;
-  flow: FlowState;
+  state: NeighborhoodState;
   busy: boolean;
   onAct: (c: PendingChange, a: 'confirm_change' | 'reject_change') => void;
 }) {
@@ -395,9 +457,6 @@ function ChangeCards({
                 <X aria-hidden /> Reject
               </button>
             </div>
-            {flow.jobId === c.job_id && flow.phase === 'confirm' && flow.message && (
-              <p className="ps-muted">{flow.message}</p>
-            )}
           </section>
         ) : (
           <section key={c.id} className="ps-card ps-infeasible" aria-live="polite">
@@ -462,9 +521,7 @@ function FlowStatus({ flow, onDismiss }: { flow: FlowState; onDismiss: () => voi
           </button>
         )}
       </div>
-      {running && flow.stage && <div className="ps-muted">{flow.stage}</div>}
       {detail && detail !== headline && <div className="ps-muted">{detail}</div>}
-      {running && flow.error && <div className="ps-muted">Connection problem: {errorText(flow.error)} Still trying…</div>}
     </section>
   );
 }
@@ -530,7 +587,7 @@ function senderLabel(sender: string, homeId: HomeId): string {
   return sender;
 }
 
-function Messages({ homeId, state }: { homeId: HomeId; state: HouseholdState }) {
+function Messages({ homeId, state }: { homeId: HomeId; state: NeighborhoodState }) {
   const events = useMemo(() => [...state.events].sort((a, b) => a.sequence - b.sequence), [state.events]);
   return (
     <section className="ps-card">

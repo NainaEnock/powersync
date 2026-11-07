@@ -2,24 +2,20 @@
 
 A's proposal for `docs/contract.md` (D owns that file). Field names follow PRD §10–11. Anything marked **NEW** isn't in the PRD yet and needs an OK.
 
-## 1. Component (A + B)
+## 1. Component (A + B), updated for B's api.ts on main
 
 ```tsx
-import PhoneApp from './phone/PhoneApp';
-<PhoneApp homeId={homeId} state={householdState} api={phoneApi} />
+import PhoneApp from './phone/PhoneApp'
+// in App.tsx, for /phone:
+<PhoneApp homeId={homeFromQuery /* HomeId | null */} api={api} />
 ```
 
-- `homeId: 'A' | 'B' | 'C' | null`. `null` shows the household picker.
-- `state`: the response of `GET /api/state?home=<homeId>` (or B's labeled sample data), or `null` while loading.
-- `api`: B's adapter, which must satisfy `PhoneApi` in `phone/phoneTypes.ts`:
-  - `dataMode: 'live' | 'sample'`, `connection: 'connected' | 'connecting' | 'backend_down' | 'error'`, `authMode` (from `/api/health`), `stateError` (last error from state polling, such as UNAUTHORIZED or FORBIDDEN)
-  - `sendMessage(req)` → `POST /api/message`, `sendAction(req)` → `POST /api/action`, `getJob(id)` → `GET /api/jobs/{id}`
-  - `refresh()`: re-fetch state now
-  - `setToken(home, token)`, `hasToken(home)`, `setHome(home | null)`
-- Errors are thrown as `{status, code, message}`, using the codes in PRD §11.2. The adapter should throw `code: 'BACKEND_DOWN'` when the proxy returns 500/502/504 or the fetch fails.
-- B polls state every second while visible. The phone polls only its own jobs.
-
-**Home selection and codes:** `phone/session.ts` provides `resolveHomeId()` (`?home=` first, then localStorage), `storeHome()`, `getHomeToken()` and `storeHomeToken()`. B's `App.tsx` and `api.ts` can use these so there's one source of truth. The token only ever goes in `Authorization: Bearer`.
+- `homeId`: from `/phone?home=X`, or `null`. With `null`, the phone uses the household last chosen on this device (`localStorage powersync.phone.home`, needed for the installed app, which opens `/phone` with no query), otherwise it shows the picker.
+- `api`: B's `Api` from `createApi()`. The phone uses `api.state(home)` (through `usePoll`), `api.message`, `api.action`, `useJob`, `useHealth`, `getToken`/`setToken`, and `StatusBadge`.
+- `state` (optional): pass `usePoll(api.state(homeId))` output if B would rather own the polling. If it's left out, the phone polls itself, the same way `Dashboard` does.
+- Times: `slotToTime` from `src/time.ts` only.
+- Errors: `ApiError.code`. `BACKEND_DOWN` and `NETWORK` show the red banner.
+- Home colors: `state.homes[].color`, with fallbacks A `#2563eb`, B `#d97706`, C `#059669`.
 
 ## 2. Requests (A + D)
 
@@ -57,10 +53,7 @@ import PhoneApp from './phone/PhoneApp';
 
 A `generation` bump (reset) clears any in-flight request on the phone.
 
-## 5. Shared formatting
+## 5. Requests for B (small)
 
-`phone/format.ts` has the TypeScript 12-hour formatter (`slotToTime`). B can move it to a shared file if the dashboard wants the same one. Tell A first.
-
-## 6. Home colors (A + B)
-
-The phone uses `state.homes[].color`. Fallbacks if missing: A `#2563eb`, B `#d97706`, C `#059669`.
+- `useJob` stops silently on `NOT_FOUND`, so the phone can't tell that a job vanished unless `generation` changes. It would help if `useJob` returned the error, or a `{job, error}` pair.
+- `time.ts` hard-codes 6:00 PM and 15-minute slots. That's fine while `horizon_start` and `slot_minutes` never change.

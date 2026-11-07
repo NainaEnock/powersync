@@ -1,15 +1,8 @@
 // Request → job → confirmation → applied flow for one phone (PRD §11, §16).
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { newRequestId } from './format';
-import {
-  isApiError,
-  type ApiErrorLike,
-  type HomeId,
-  type HouseholdState,
-  type Job,
-  type PendingChange,
-  type PhoneApi,
-} from './phoneTypes';
+// Uses B's api.message / api.action and useJob for job polling.
+import { useCallback, useEffect, useState } from 'react';
+import { ApiError, useJob, type Api } from '../api';
+import type { HomeId, NeighborhoodState, PendingChange } from '../types';
 
 export type FlowPhase =
   | 'idle'
@@ -26,18 +19,15 @@ export interface FlowState {
   phase: FlowPhase;
   jobId: string | null;
   kind: 'message' | 'action' | null;
-  stage: string | null;
-  /** Plain-English line for the status card. */
+  /** Dismissing an infeasible result: finish silently instead of announcing "rejected". */
+  quiet: boolean;
   message: string | null;
-  /** Error that the screen should react to (token entry, forbidden, etc). */
-  error: ApiErrorLike | null;
+  error: ApiError | null;
 }
 
-const IDLE: FlowState = { phase: 'idle', jobId: null, kind: null, stage: null, message: null, error: null };
-const POLL_MS = 1000;
-const TERMINAL: Job['status'][] = ['completed', 'failed', 'awaiting_confirmation'];
+const IDLE: FlowState = { phase: 'idle', jobId: null, kind: null, quiet: false, message: null, error: null };
 
-export function errorText(err: ApiErrorLike): string {
+export function errorText(err: ApiError): string {
   switch (err.code) {
     case 'UNAUTHORIZED':
       return 'This phone needs its household code.';
@@ -53,165 +43,110 @@ export function errorText(err: ApiErrorLike): string {
       return 'That request was lost, maybe because the demo was reset. Please send it again.';
     case 'PAYLOAD_TOO_LARGE':
       return 'That message is too long. Try something shorter.';
-    case 'BACKEND_DOWN':
-      return 'Backend not running on port 8000.';
     default:
       return err.message || 'Something went wrong.';
   }
 }
 
-function toApiError(e: unknown): ApiErrorLike {
-  if (isApiError(e)) return e;
-  return { status: 0, code: 'BACKEND_DOWN', message: e instanceof Error ? e.message : String(e) };
+function toApiError(e: unknown): ApiError {
+  if (e instanceof ApiError) return e;
+  return new ApiError('UNKNOWN', e instanceof Error ? e.message : String(e), 0);
 }
 
-function phaseForRunning(kind: 'message' | 'action', job: Job): FlowPhase {
-  if (job.status === 'queued') return 'queued';
-  return kind === 'message' ? 'interpreting' : 'planning';
-}
-
-function jobErrorText(job: Job): string {
-  if (job.error) {
-    const idx = job.error.indexOf(':');
-    return idx >= 0 ? job.error.slice(idx + 1).trim() : job.error;
+function jobErrorText(error: string | null, fallback?: string): string {
+  if (error) {
+    const idx = error.indexOf(':');
+    return idx >= 0 ? error.slice(idx + 1).trim() : error;
   }
-  return job.result?.message ?? 'The request failed.';
+  return fallback ?? 'The request failed.';
 }
 
-export function usePhoneFlow(homeId: HomeId | null, state: HouseholdState | null, api: PhoneApi) {
+export function usePhoneFlow(
+  api: Api,
+  homeId: HomeId | null,
+  state: NeighborhoodState | null,
+  refresh: () => void,
+) {
   const [flow, setFlow] = useState<FlowState>(IDLE);
-  const timer = useRef<number | null>(null);
-  const alive = useRef(true);
+  const job = useJob(api, flow.jobId);
   const generation = state?.generation;
-
-  const stopPolling = useCallback(() => {
-    if (timer.current != null) window.clearTimeout(timer.current);
-    timer.current = null;
-  }, []);
-
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-      stopPolling();
-    };
-  }, [stopPolling]);
 
   // A reset (generation bump) or household switch drops any in-flight flow.
   useEffect(() => {
-    stopPolling();
     setFlow(IDLE);
-  }, [generation, homeId, stopPolling]);
+  }, [generation, homeId]);
 
-  const poll = useCallback(
-    (jobId: string, kind: 'message' | 'action', quiet = false) => {
-      const tick = async () => {
-        if (!alive.current) return;
-        let job: Job;
-        try {
-          job = await api.getJob(jobId);
-        } catch (e) {
-          const err = toApiError(e);
-          if (err.code === 'NOT_FOUND') {
-            setFlow({ ...IDLE, phase: 'failed', message: errorText(err), error: err });
-            return;
-          }
-          // Transient: keep the current phase, show the problem, keep polling.
-          setFlow((f) => ({ ...f, error: err }));
-          timer.current = window.setTimeout(tick, POLL_MS * 2);
-          return;
-        }
-        if (!alive.current) return;
-        if (!TERMINAL.includes(job.status)) {
-          setFlow((f) => ({ ...f, phase: phaseForRunning(kind, job), stage: job.stage ?? null, error: null }));
-          timer.current = window.setTimeout(tick, POLL_MS);
-          return;
-        }
-        // Make sure the plan/pending change on screen matches the job result.
-        api.refresh().catch(() => undefined);
-        if (quiet && job.status !== 'failed') {
-          setFlow(IDLE);
-          return;
-        }
-        const outcome = job.result?.outcome ?? '';
-        const msg = job.result?.message ?? null;
-        if (job.status === 'failed') {
-          setFlow({ ...IDLE, phase: 'failed', jobId, kind, message: jobErrorText(job) });
-        } else if (job.status === 'awaiting_confirmation') {
-          setFlow({ ...IDLE, phase: 'confirm', jobId, kind, message: msg });
-        } else if (outcome === 'infeasible' || outcome.includes('infeasible')) {
-          setFlow({ ...IDLE, phase: 'infeasible', jobId, kind, message: msg });
-        } else if (kind === 'action' && outcome.includes('reject')) {
-          setFlow({ ...IDLE, phase: 'rejected', jobId, kind, message: msg ?? 'Change rejected. Your plan stays the same.' });
-        } else {
-          setFlow({ ...IDLE, phase: 'applied', jobId, kind, message: msg });
-        }
-      };
-      stopPolling();
-      timer.current = window.setTimeout(tick, 300);
-    },
-    [api, stopPolling],
-  );
+  // Follow the job B's useJob is polling.
+  useEffect(() => {
+    if (!job || job.id !== flow.jobId) return;
+    const kind = flow.kind ?? 'message';
+    if (job.status === 'queued' || job.status === 'running') {
+      const phase = job.status === 'queued' ? 'queued' : kind === 'message' ? 'interpreting' : 'planning';
+      setFlow((f) => (f.phase === phase && f.message === job.stage ? f : { ...f, phase, message: job.stage }));
+      return;
+    }
+    // Terminal or confirmation: pull fresh state so the plan / pending change matches.
+    refresh();
+    const outcome = job.result?.outcome ?? '';
+    const msg = job.result?.message ?? null;
+    setFlow((f) => {
+      if (f.jobId !== job.id) return f;
+      const base = { ...IDLE, jobId: job.id, kind };
+      if (job.status === 'failed') return { ...base, phase: 'failed', message: jobErrorText(job.error, msg ?? undefined) };
+      if (f.quiet) return IDLE;
+      if (job.status === 'awaiting_confirmation') return { ...base, phase: 'confirm', message: msg };
+      if (outcome.includes('infeasible')) return { ...base, phase: 'infeasible', message: msg };
+      if (kind === 'action' && outcome.includes('reject'))
+        return { ...base, phase: 'rejected', message: msg ?? 'Change rejected. Your plan stays the same.' };
+      return { ...base, phase: 'applied', message: msg };
+    });
+  }, [job, flow.jobId, flow.kind, refresh]);
 
   const busy = flow.phase === 'queued' || flow.phase === 'interpreting' || flow.phase === 'planning';
 
+  const handleError = useCallback(
+    (e: unknown) => {
+      const err = toApiError(e);
+      if (err.code === 'STALE_REVISION' || err.code === 'NOT_FOUND') refresh();
+      setFlow({ ...IDLE, message: errorText(err), error: err });
+    },
+    [refresh],
+  );
+
+  /** Returns true when the request was accepted (so the text box can clear). */
   const send = useCallback(
     async (text: string): Promise<boolean> => {
-      if (!homeId || !state || busy) return false;
       const trimmed = text.trim();
-      if (!trimmed) return false;
-      setFlow({ ...IDLE, phase: 'queued', kind: 'message', message: null });
+      if (!homeId || !state || busy || !trimmed) return false;
+      setFlow({ ...IDLE, phase: 'queued', kind: 'message' });
       try {
-        const res = await api.sendMessage({
-          home_id: homeId,
-          text: trimmed,
-          request_id: newRequestId(homeId),
-          expected_revision: state.revision,
-        });
-        if (!alive.current) return true;
+        const res = await api.message(homeId, trimmed, state.revision);
         setFlow((f) => ({ ...f, jobId: res.job_id }));
-        poll(res.job_id, 'message');
         return true;
       } catch (e) {
-        const err = toApiError(e);
-        if (err.code === 'STALE_REVISION') api.refresh().catch(() => undefined);
-        setFlow({ ...IDLE, phase: 'idle', message: errorText(err), error: err });
+        handleError(e);
         return false;
       }
     },
-    [api, busy, homeId, poll, state],
+    [api, busy, handleError, homeId, state],
   );
 
   const act = useCallback(
     async (change: PendingChange, action: 'confirm_change' | 'reject_change') => {
-      // Dismissing an infeasible result is just "OK", not a rejection to announce.
-      const quiet = !change.feasible;
       if (!homeId || !state || busy) return;
-      setFlow({ ...IDLE, phase: action === 'confirm_change' ? 'planning' : 'queued', kind: 'action' });
+      const quiet = !change.feasible;
+      setFlow({ ...IDLE, phase: action === 'confirm_change' ? 'planning' : 'queued', kind: 'action', quiet });
       try {
-        const res = await api.sendAction({
-          home_id: homeId,
-          action,
-          pending_change_id: change.id,
-          request_id: newRequestId(homeId),
-          expected_revision: state.revision,
-        });
-        if (!alive.current) return;
+        const res = await api.action(homeId, action, change.id, state.revision);
         setFlow((f) => ({ ...f, jobId: res.job_id }));
-        poll(res.job_id, 'action', quiet);
       } catch (e) {
-        const err = toApiError(e);
-        if (err.code === 'STALE_REVISION' || err.code === 'NOT_FOUND') api.refresh().catch(() => undefined);
-        setFlow({ ...IDLE, phase: 'idle', message: errorText(err), error: err });
+        handleError(e);
       }
     },
-    [api, busy, homeId, poll, state],
+    [api, busy, handleError, homeId, state],
   );
 
-  const dismiss = useCallback(() => {
-    stopPolling();
-    setFlow(IDLE);
-  }, [stopPolling]);
+  const dismiss = useCallback(() => setFlow(IDLE), []);
 
   return { flow, busy, send, act, dismiss };
 }

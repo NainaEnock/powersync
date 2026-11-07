@@ -511,3 +511,11 @@
     animation: none;
   }
 }
+
+.ps-banner-sample {
+  background: #fef3c7;
+  color: #92400e;
+}
+.ps-header .status-badge {
+  margin-top: 8px;
+}
