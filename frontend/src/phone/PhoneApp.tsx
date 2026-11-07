@@ -14,6 +14,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Info,
   KeyRound,
   Loader2,
   Send,
@@ -225,7 +226,13 @@ function PhoneHome({
           <SummaryTiles homeId={homeId} state={state} />
           <PlanCard homeId={homeId} state={state} replanning={busy && flow.kind === 'action'} />
           <ChangeCards homeId={homeId} state={state} busy={busy} onAct={act} />
-          <FlowStatus flow={flow} onDismiss={dismiss} />
+          <FlowStatus
+            flow={flow}
+            onDismiss={dismiss}
+            infeasibleCardShown={state.pending_changes.some(
+              (c) => c.home_id === homeId && c.status === 'pending' && !c.feasible,
+            )}
+          />
           <RequestBox homeId={homeId} busy={busy} onSend={send} />
           <Messages homeId={homeId} state={state} />
         </>
@@ -492,18 +499,42 @@ const PHASE_LABEL: Partial<Record<FlowState['phase'], string>> = {
   applied: 'Done. Your new plan is above.',
   rejected: 'Change rejected. Your plan stays the same.',
   infeasible: "That request can't fit. Your plan has not changed.",
-  failed: 'That request failed.',
+  clarify: 'Your agent has a question.',
+  no_change: 'Nothing to change.',
+  failed: 'Nothing was changed.',
 };
 
-function FlowStatus({ flow, onDismiss }: { flow: FlowState; onDismiss: () => void }) {
+function FlowStatus({
+  flow,
+  onDismiss,
+  infeasibleCardShown,
+}: {
+  flow: FlowState;
+  onDismiss: () => void;
+  infeasibleCardShown: boolean;
+}) {
   if (flow.phase === 'idle' && !flow.message) return null;
   const running = flow.phase === 'queued' || flow.phase === 'interpreting' || flow.phase === 'planning';
   const bad = flow.phase === 'failed' || flow.phase === 'infeasible' || (flow.phase === 'idle' && !!flow.error);
   const good = flow.phase === 'applied';
+  // Clarifying questions and "no change" replies are the agent's own text, so they lead.
+  const textLeads = (flow.phase === 'clarify' || flow.phase === 'no_change' || flow.phase === 'failed') && !!flow.message;
   const headline =
-    flow.phase === 'idle' ? (flow.error ? errorText(flow.error) : flow.message) : PHASE_LABEL[flow.phase];
-  // The infeasible card already shows the explanation; don't repeat it here.
-  const detail = flow.phase === 'idle' || flow.phase === 'infeasible' ? null : flow.message;
+    flow.phase === 'idle'
+      ? flow.error
+        ? errorText(flow.error)
+        : flow.message
+      : textLeads
+        ? flow.message
+        : PHASE_LABEL[flow.phase];
+  // If an infeasible card is on screen it already shows the reason; otherwise show it here.
+  const detail =
+    flow.phase === 'idle' ||
+    flow.phase === 'confirm' || // the confirmation card shows the change itself
+    textLeads ||
+    (flow.phase === 'infeasible' && infeasibleCardShown)
+      ? null
+      : flow.message;
   return (
     <section className={`ps-status-card ${bad ? 'ps-status-bad' : good ? 'ps-status-good' : ''}`} aria-live="polite">
       <div className="ps-status-line">
@@ -513,6 +544,8 @@ function FlowStatus({ flow, onDismiss }: { flow: FlowState; onDismiss: () => voi
           <CheckCircle2 aria-hidden />
         ) : bad ? (
           <AlertTriangle aria-hidden />
+        ) : flow.phase === 'clarify' || flow.phase === 'no_change' ? (
+          <Info aria-hidden />
         ) : null}
         <span>{headline}</span>
         {!running && (
