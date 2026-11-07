@@ -322,7 +322,8 @@ class Store:
         )
         self.pending[pc.id] = pc
         if feasible:
-            reply(f"{explanation} Confirm on your phone to replan with the neighbors.")
+            reply(explanation if "confirm" in explanation.lower()
+                  else f"{explanation} Confirm on your phone to replan with the neighbors.")
             job.status, job.stage = "awaiting_confirmation", "Waiting for you to confirm"
             job.result = {"outcome": "proposed_change", "message": explanation, "pending_change_id": pc.id}
             job.updated_at = now()

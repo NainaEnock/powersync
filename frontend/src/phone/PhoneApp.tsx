@@ -408,13 +408,23 @@ function PlanCard({ homeId, state, replanning }: { homeId: HomeId; state: Neighb
               </div>
               <div className="ps-plan-body">
                 <div className="ps-plan-name">
-                  {task.name} <span className="ps-muted">· {task.power_kw} kW</span>
+                  {task.name} <span className="ps-muted ps-nowrap">· {task.power_kw} kW</span>
                 </div>
                 <div className="ps-plan-time">
-                  {e ? `${t(e.start_slot)} – ${t(e.start_slot + e.duration_slots)}` : 'Not scheduled'}
+                  {e ? (
+                    <>
+                      <span className="ps-nowrap">{t(e.start_slot)}</span> –{' '}
+                      <span className="ps-nowrap">{t(e.start_slot + e.duration_slots)}</span>
+                    </>
+                  ) : (
+                    'Not scheduled'
+                  )}
                 </div>
                 <div className="ps-plan-deadline">
-                  <Clock aria-hidden /> Needs to finish by {t(task.deadline_slot)}
+                  <Clock aria-hidden />
+                  <span>
+                    Needs to finish by <span className="ps-nowrap">{t(task.deadline_slot)}</span>
+                  </span>
                 </div>
               </div>
               <span className={`ps-status ${ok ? 'ps-ok' : 'ps-bad'}`}>{ok ? 'On time' : 'Late'}</span>
